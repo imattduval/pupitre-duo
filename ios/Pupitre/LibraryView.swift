@@ -88,6 +88,15 @@ struct LibraryView: View {
             }
         }
         .environment(loader)
+        #if DEBUG
+        // Test sur appareil : ouvre un morceau déjà chargé (devicectl ne peut pas toucher l'écran).
+        .task {
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "-ouvrir"), index + 1 < arguments.count {
+                playing = library.ready.first { $0.title.localizedCaseInsensitiveContains(arguments[index + 1]) }
+            }
+        }
+        #endif
         .fullScreenCover(item: $playing) { song in
             PlayerView(song: song, playlist: playlist)
         }

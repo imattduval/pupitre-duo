@@ -30,13 +30,11 @@ enum Chords {
                 var lyric = Array(next.text)
                 while max(chords.count, lyric.count) > width {
                     let cut = column(chords: chords, lyric: lyric, width: width)
-                    output.append(Line(text: String(chords.prefix(cut)), kind: .chord))
-                    output.append(Line(text: String(lyric.prefix(cut)), kind: .lyric))
+                    appendPair(chords: chords.prefix(cut), lyric: lyric.prefix(cut), to: &output)
                     chords = Array(chords.dropFirst(cut))
                     lyric = Array(lyric.dropFirst(cut))
                 }
-                output.append(Line(text: String(chords), kind: .chord))
-                output.append(Line(text: String(lyric), kind: .lyric))
+                appendPair(chords: chords[...], lyric: lyric[...], to: &output)
                 index += 2
             } else {
                 var rest = Array(line.text)
@@ -50,6 +48,16 @@ enum Chords {
             }
         }
         return output
+    }
+
+    /// Une suite de ligne sans accord ne laisse pas de ligne vide au-dessus de ses paroles.
+    private static func appendPair(chords: ArraySlice<Character>, lyric: ArraySlice<Character>, to output: inout [Line]) {
+        if chords.contains(where: { $0 != " " }) {
+            output.append(Line(text: String(chords), kind: .chord))
+        }
+        if lyric.contains(where: { $0 != " " }) {
+            output.append(Line(text: String(lyric), kind: .lyric))
+        }
     }
 
     /// Dernière colonne avant la largeur qui ne coupe ni un mot ni un accord.
