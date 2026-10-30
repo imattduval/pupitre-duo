@@ -17,6 +17,11 @@ struct Song: Codable, Identifiable, Equatable {
     var isReady: Bool { text != nil }
     /// Le numéro UG, à la fin du lien quelle que soit sa forme.
     var tabID: Int? { url.firstMatch(of: /(\d+)$/).flatMap { Int($0.output.1) } }
+    /// La lettre de la colonne alphabétique ; « # » pour ce qui ne commence pas par une lettre.
+    var initial: String {
+        let first = title.folding(options: .diacriticInsensitive, locale: nil).uppercased().first
+        return first.map { $0.isLetter && $0.isASCII ? String($0) : "#" } ?? "#"
+    }
 }
 
 struct Playlist: Decodable, Identifiable, Hashable {
@@ -60,6 +65,7 @@ final class Library {
             UserDefaults.standard.set(true, forKey: "taille.140")
         }
         loadAccount()
+        sortAlphabetically()
     }
 
     /// La liste du compte UG (titres et liens, sans paroles). Les morceaux ne sont ajoutés
@@ -95,7 +101,7 @@ final class Library {
     var decadePlaylists: [Playlist] {
         guard !classement.isEmpty else { return [] }
         var groups: [Int: [Int]] = [:]
-        for song in songs {
+        for song in alphabetical {
             guard let id = song.tabID else { continue }
             groups[classement[id]?.decade ?? 0, default: []].append(id)
         }
@@ -108,7 +114,7 @@ final class Library {
     var languagePlaylists: [Playlist] {
         guard !classement.isEmpty else { return [] }
         var groups: [String: [Int]] = [:]
-        for song in songs {
+        for song in alphabetical {
             guard let id = song.tabID else { continue }
             // Les paroles chargées priment sur l'estimation faite d'après le titre et l'artiste.
             groups[song.language ?? classement[id]?.language ?? "Langue inconnue", default: []].append(id)
@@ -133,8 +139,18 @@ final class Library {
         }
     }
 
+    /// Toute la bibliothèque de A à Z, sans tenir compte des accents.
+    private(set) var alphabetical: [Song] = []
+
+    private func sortAlphabetically() {
+        alphabetical = songs
+            .map { (key: $0.title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil), song: $0) }
+            .sorted { $0.key < $1.key }
+            .map(\.song)
+    }
+
     func songs(in playlist: Playlist?) -> [Song] {
-        guard let playlist else { return songs }
+        guard let playlist else { return alphabetical }
         var byID: [Int: Song] = [:]
         for song in songs {
             if let id = song.tabID { byID[id] = song }
@@ -200,6 +216,7 @@ final class Library {
     }
 
     private func save() {
+        sortAlphabetically()
         if let data = try? JSONEncoder().encode(songs) {
             try? data.write(to: file, options: .atomic)
         }

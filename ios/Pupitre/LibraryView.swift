@@ -13,6 +13,7 @@ struct LibraryView: View {
     @State private var message: String?
 
     @State private var playlist: Playlist?
+    @State private var activeLetter: String?
     @State private var isChoosingPlaylist = false
     @State private var isSearchPresented = false
     @FocusState private var isSearchFocused: Bool
@@ -33,6 +34,7 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             List {
                 if !filtered.isEmpty {
                     Section(countLabel) {
@@ -54,6 +56,13 @@ struct LibraryView: View {
                         ForEach(results) { resultRow($0) }
                     }
                 }
+            }
+            .contentMargins(.trailing, query.isEmpty ? 40 : 0, for: .scrollContent)
+            .overlay(alignment: .trailing) {
+                if query.isEmpty, !filtered.isEmpty {
+                    alphabetBar(proxy)
+                }
+            }
             }
             .overlay {
                 if library.songs.isEmpty && !searched && !isSearching {
@@ -127,6 +136,37 @@ struct LibraryView: View {
             BrowserView(start: target.url)
                 .environment(loader)
         }
+    }
+
+    private static let letters = (65...90).map { String(UnicodeScalar($0)) } + ["#"]
+
+    /// Grosses lettres à droite : toucher ou glisser le doigt va au premier titre de la lettre.
+    private func alphabetBar(_ proxy: ScrollViewProxy) -> some View {
+        let present = Set(scope.map(\.initial))
+        return GeometryReader { geometry in
+            VStack(spacing: 0) {
+                ForEach(Self.letters, id: \.self) { letter in
+                    Text(letter)
+                        .font(.system(size: min(20, geometry.size.height / 27 * 0.8), weight: .bold))
+                        .foregroundStyle(present.contains(letter) ? Palette.chord : Color.secondary.opacity(0.35))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .contentShape(.rect)
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                let index = Int(value.location.y / geometry.size.height * CGFloat(Self.letters.count))
+                let letter = Self.letters[min(Self.letters.count - 1, max(0, index))]
+                guard letter != activeLetter else { return }
+                activeLetter = letter
+                if let song = scope.first(where: { $0.initial == letter }) {
+                    proxy.scrollTo(song.id, anchor: .top)
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            }.onEnded { _ in activeLetter = nil })
+        }
+        .frame(width: 44)
+        .padding(.bottom, 64)
+        .accessibilityHidden(true)
     }
 
     private func openSearch() {
