@@ -12,18 +12,25 @@ struct LibraryView: View {
     @State private var loadingURL: String?
     @State private var message: String?
 
+    @State private var playlist: Playlist?
+
+    private var scope: [Song] { library.songs(in: playlist) }
+
     private var filtered: [Song] {
-        guard !query.isEmpty else { return library.songs }
-        return library.songs.filter { ($0.title + " " + $0.artist).localizedCaseInsensitiveContains(query) }
+        guard !query.isEmpty else { return scope }
+        return scope.filter { ($0.title + " " + $0.artist).localizedCaseInsensitiveContains(query) }
+    }
+
+    private var countLabel: String {
+        let ready = scope.filter(\.isReady).count
+        return ready == scope.count ? "\(scope.count) morceaux" : "\(ready) sur \(scope.count) prêts"
     }
 
     var body: some View {
         NavigationStack {
             List {
                 if !filtered.isEmpty {
-                    Section(library.readyCount == library.songs.count
-                            ? "\(library.songs.count) morceaux"
-                            : "\(library.readyCount) sur \(library.songs.count) prêts") {
+                    Section(countLabel) {
                         ForEach(filtered) { row($0) }
                             .onDelete { offsets in
                                 offsets.map { filtered[$0] }.forEach(library.remove)
@@ -55,8 +62,16 @@ struct LibraryView: View {
             .onChange(of: query) { _, text in
                 if text.isEmpty { results = []; searched = false }
             }
-            .navigationTitle("Pupitre")
+            .navigationTitle(playlist?.name ?? "Tous mes tabs")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu("Playlists", systemImage: "music.note.list") {
+                        Button("Tous mes tabs") { playlist = nil }
+                        group("Par décennie", library.decadePlaylists)
+                        group("Par langue", library.languagePlaylists)
+                        group("Mes playlists", library.playlists)
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Ultimate Guitar", systemImage: "globe") {
                         browsing = BrowserTarget(url: Self.home)
@@ -74,11 +89,22 @@ struct LibraryView: View {
         }
         .environment(loader)
         .fullScreenCover(item: $playing) { song in
-            PlayerView(song: song)
+            PlayerView(song: song, playlist: playlist)
         }
         .sheet(item: $browsing) { target in
             BrowserView(start: target.url)
                 .environment(loader)
+        }
+    }
+
+    @ViewBuilder
+    private func group(_ title: String, _ items: [Playlist]) -> some View {
+        if !items.isEmpty {
+            Menu(title) {
+                ForEach(items) { item in
+                    Button("\(item.name) · \(item.ids.count)") { playlist = item }
+                }
+            }
         }
     }
 
@@ -173,7 +199,13 @@ struct LibraryView: View {
         } catch LoadError.needsBrowser {
             browsing = URL(string: url).map { BrowserTarget(url: $0) }
         } catch {
-            show("Chargement impossible. Vérifie le réseau.")
+            // Les tabs interactives (Official, Tabs) ne sont souvent pas du texte : on montre la page.
+            if let song = library.songs.first(where: { $0.url == url }),
+               let type = song.type, !type.contains("Chords") {
+                browsing = URL(string: url).map { BrowserTarget(url: $0) }
+            } else {
+                show("Chargement impossible. Essaie en Wi-Fi.")
+            }
         }
     }
 

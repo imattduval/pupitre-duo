@@ -5,17 +5,23 @@ struct PlayerView: View {
     @Environment(Library.self) private var library
     @Environment(\.dismiss) private var dismiss
     @State var song: Song
+    let playlist: Playlist?
     @State private var isPlaying = false
     @State private var lyricsOnly = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            SheetView(song: song, lyricsOnly: lyricsOnly, isPlaying: $isPlaying)
-                .id(song.url)
-            Divider()
-            controls
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                header(topInset: proxy.safeAreaInsets.top)
+                Divider()
+                SheetView(song: song, lyricsOnly: lyricsOnly, isPlaying: $isPlaying)
+                    .id(song.url)
+                Divider()
+                controls
+                    .padding(.bottom, max(8, proxy.safeAreaInsets.bottom * 0.4))
+                    .background(Palette.panel)
+            }
+            .ignoresSafeArea(edges: [.top, .bottom])
         }
         .background(Palette.background)
         .onChange(of: isPlaying) { _, playing in
@@ -25,78 +31,102 @@ struct PlayerView: View {
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
-    private var header: some View {
-        HStack(spacing: 8) {
+    /// Duo ouvert : l'heure occupe le haut à droite, le titre se place dans la même bande, à sa gauche.
+    private func header(topInset: CGFloat) -> some View {
+        HStack(spacing: 4) {
             iconButton("chevron.left", label: "Retour à la liste") { dismiss() }
             VStack(alignment: .leading, spacing: 0) {
-                Text(song.title).font(.headline).lineLimit(1)
+                Text(song.title).font(.headline).lineLimit(2).minimumScaleFactor(0.8)
                 Text(song.artist).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 4)
             iconButton("backward.end.fill", label: "Morceau précédent") { go(-1) }
             iconButton("forward.end.fill", label: "Morceau suivant") { go(1) }
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
+        .padding(.leading, 6)
+        .padding(.trailing, topInset > 30 ? 180 : 6)
+        .padding(.top, 6)
+        .frame(minHeight: max(56, topInset))
     }
 
+    // Grosses cibles pour viser sans regarder. « Défiler » et « Paroles » sont en diagonale
+    // et de couleurs différentes pour ne pas les confondre.
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 18) { playButton; speed; key; textSize; lyricsButton }
-            VStack(spacing: 8) {
-                HStack(spacing: 18) { playButton; speed }
-                HStack(spacing: 18) { key; textSize; lyricsButton }
-            }
+        VStack(spacing: 8) {
+            HStack(spacing: 8) { playButton; speed }
+            HStack(spacing: 8) { key; textSize; lyricsButton }
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
+        .padding(.horizontal, 8).padding(.top, 8)
         .frame(maxWidth: .infinity)
-        .background(Palette.panel)
     }
 
     private var playButton: some View {
-        Button(isPlaying ? "Pause" : "Défiler") { isPlaying.toggle() }
-            .font(.headline)
-            .frame(minWidth: 110, minHeight: 48)
-            .background(Palette.chord, in: .rect(cornerRadius: 12))
-            .foregroundStyle(.black)
+        Button { isPlaying.toggle() } label: {
+            Text(isPlaying ? "Pause" : "Défiler")
+                .font(.title2.bold())
+                .frame(maxWidth: .infinity, minHeight: 68)
+                .background(Palette.chord, in: .rect(cornerRadius: 14))
+                .foregroundStyle(.black)
+                .contentShape(.rect)
+        }
     }
 
     private var speed: some View {
-        stepper(title: "Vitesse", value: "\(Int(song.speed))",
+        stepper(icon: "speedometer", label: "Vitesse", value: "\(Int(song.speed))",
                 minus: { change { $0.speed = max(5, $0.speed - 5) } },
                 plus: { change { $0.speed = min(150, $0.speed + 5) } })
     }
 
     private var key: some View {
-        stepper(title: "Ton", value: song.transpose > 0 ? "+\(song.transpose)" : "\(song.transpose)",
+        stepper(icon: "music.note", label: "Ton", value: song.transpose > 0 ? "+\(song.transpose)" : "\(song.transpose)",
                 minus: { change { $0.transpose -= 1 } },
                 plus: { change { $0.transpose += 1 } })
     }
 
     private var textSize: some View {
-        stepper(title: "Texte", value: "\(Int((song.scale * 100).rounded()))%",
+        stepper(icon: "textformat.size", label: "Texte", value: "\(Int((song.scale * 100).rounded()))%",
                 minus: { change { $0.scale = max(0.6, $0.scale - 0.1) } },
                 plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
     }
 
     private var lyricsButton: some View {
-        Button("Paroles") { lyricsOnly.toggle() }
-            .lineLimit(1)
-            .fixedSize()
-            .accessibilityLabel("Paroles seules")
-            .frame(minHeight: 48)
-            .foregroundStyle(lyricsOnly ? Palette.chord : .primary)
+        Button { lyricsOnly.toggle() } label: {
+            Text(lyricsOnly ? "Accords" : "Paroles")
+                .font(.headline.bold())
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 14)
+                .frame(minHeight: 68)
+                .background(Palette.section, in: .rect(cornerRadius: 14))
+                .foregroundStyle(.black)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
     }
 
-    private func stepper(title: String, value: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
-        HStack(spacing: 2) {
-            iconButton("minus", label: "\(title) moins", action: minus)
-            VStack(spacing: 0) {
-                Text(title).font(.caption2).foregroundStyle(.secondary)
-                Text(value).font(.subheadline.bold()).monospacedDigit()
+    private func stepper(icon: String, label: String, value: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
+        HStack(spacing: 0) {
+            stepButton("minus", label: "\(label) moins", action: minus)
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.body).foregroundStyle(.secondary)
+                Text(value).font(.subheadline.bold()).monospacedDigit().lineLimit(1).fixedSize()
             }
-            .frame(minWidth: 46)
-            iconButton("plus", label: "\(title) plus", action: plus)
+            .frame(minWidth: 42)
+            stepButton("plus", label: "\(label) plus", action: plus)
         }
+        .frame(maxWidth: .infinity)
+        .background(Palette.background, in: .rect(cornerRadius: 14))
+    }
+
+    private func stepButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.title2.bold())
+                .frame(maxWidth: .infinity, minHeight: 68)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(label)
+        .foregroundStyle(.primary)
     }
 
     private func iconButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
@@ -113,7 +143,7 @@ struct PlayerView: View {
     }
 
     private func go(_ step: Int) {
-        guard let next = library.neighbour(of: song, step: step) else { return }
+        guard let next = library.neighbour(of: song, step: step, in: playlist) else { return }
         isPlaying = false
         lyricsOnly = false
         song = next
@@ -164,7 +194,7 @@ private struct SheetView: UIViewRepresentable {
         private var link: CADisplayLink?
         private var accumulated: CGFloat = 0
         private var signature = ""
-        private var lines: [(String, UIColor, Bool)] = []
+        private var lines: [Chords.Line] = []
         private var scale: Double = 1
 
         init(isPlaying: Binding<Bool>) { isPlayingBinding = isPlaying }
@@ -181,12 +211,12 @@ private struct SheetView: UIViewRepresentable {
             lines = text.components(separatedBy: "\n").compactMap { raw in
                 var line = raw
                 while line.last?.isWhitespace == true { line.removeLast() }
-                if Chords.isSection(line) { return (line, UIColor(Palette.section), true) }
+                if Chords.isSection(line) { return Chords.Line(text: line, kind: .section) }
                 if Chords.isChordLine(line) {
                     if lyricsOnly { return nil }
-                    return (Chords.transpose(line, by: song.transpose, flats: flats), UIColor(Palette.chord), true)
+                    return Chords.Line(text: Chords.transpose(line, by: song.transpose, flats: flats), kind: .chord)
                 }
-                return (line, .white, false)
+                return Chords.Line(text: line, kind: .lyric)
             }
             layout()
         }
@@ -195,24 +225,25 @@ private struct SheetView: UIViewRepresentable {
             guard let scroll, scroll.bounds.width > 0 else { return }
             let inset: CGFloat = 16
             let available = scroll.bounds.width - inset * 2
-            let longest = max(20, lines.map(\.0.count).max() ?? 20)
+            let longest = max(20, lines.map(\.text.count).max() ?? 20)
             let unit = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)]).width / 100
             let size = min(34, max(11, available / (CGFloat(longest) * unit) - 0.1)) * scale
+            let visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = size * 0.18
             paragraph.lineBreakMode = .byClipping
             let output = NSMutableAttributedString()
-            for (index, (line, color, bold)) in lines.enumerated() {
-                output.append(NSAttributedString(string: line + (index < lines.count - 1 ? "\n" : ""), attributes: [
-                    .font: UIFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular),
-                    .foregroundColor: color,
+            for (index, line) in visible.enumerated() {
+                output.append(NSAttributedString(string: line.text + (index < visible.count - 1 ? "\n" : ""), attributes: [
+                    .font: UIFont.monospacedSystemFont(ofSize: size, weight: line.kind == .lyric ? .regular : .bold),
+                    .foregroundColor: line.kind == .chord ? UIColor(Palette.chord) : line.kind == .section ? UIColor(Palette.section) : .white,
                     .paragraphStyle: paragraph,
                 ]))
             }
             label.attributedText = output
             let needed = label.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
-            label.frame = CGRect(x: inset, y: inset, width: max(available, needed.width), height: needed.height)
-            scroll.contentSize = CGSize(width: max(scroll.bounds.width, needed.width + inset * 2),
+            label.frame = CGRect(x: inset, y: inset, width: available, height: needed.height)
+            scroll.contentSize = CGSize(width: scroll.bounds.width,
                                         height: needed.height + inset + scroll.bounds.height * 0.55)
         }
 

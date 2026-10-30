@@ -11,6 +11,63 @@ enum Chords {
         "G": 7, "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11, "Cb": 11, "E#": 5, "B#": 0, "Fb": 4,
     ]
 
+    struct Line {
+        enum Kind { case chord, lyric, section }
+        var text: String
+        var kind: Kind
+    }
+
+    /// Passe à la ligne ce qui dépasse. Une ligne d'accords et ses paroles sont coupées
+    /// à la même colonne, pour que chaque accord reste au-dessus de sa syllabe.
+    static func wrap(_ lines: [Line], width: Int) -> [Line] {
+        var output: [Line] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            let next = index + 1 < lines.count ? lines[index + 1] : nil
+            if line.kind == .chord, let next, next.kind == .lyric, !next.text.isEmpty {
+                var chords = Array(line.text)
+                var lyric = Array(next.text)
+                while max(chords.count, lyric.count) > width {
+                    let cut = column(chords: chords, lyric: lyric, width: width)
+                    output.append(Line(text: String(chords.prefix(cut)), kind: .chord))
+                    output.append(Line(text: String(lyric.prefix(cut)), kind: .lyric))
+                    chords = Array(chords.dropFirst(cut))
+                    lyric = Array(lyric.dropFirst(cut))
+                }
+                output.append(Line(text: String(chords), kind: .chord))
+                output.append(Line(text: String(lyric), kind: .lyric))
+                index += 2
+            } else {
+                var rest = Array(line.text)
+                while rest.count > width {
+                    let cut = column(chords: line.kind == .chord ? rest : [], lyric: line.kind == .chord ? [] : rest, width: width)
+                    output.append(Line(text: String(rest.prefix(cut)), kind: line.kind))
+                    rest = Array(rest.dropFirst(cut))
+                }
+                output.append(Line(text: String(rest), kind: line.kind))
+                index += 1
+            }
+        }
+        return output
+    }
+
+    /// Dernière colonne avant la largeur qui ne coupe ni un mot ni un accord.
+    private static func column(chords: [Character], lyric: [Character], width: Int) -> Int {
+        func isBlank(_ text: [Character], _ position: Int) -> Bool {
+            position < 0 || position >= text.count || text[position] == " "
+        }
+        func splits(_ text: [Character], at cut: Int) -> Bool {
+            !isBlank(text, cut - 1) && !isBlank(text, cut)
+        }
+        var cut = width
+        while cut > width / 2 {
+            if !splits(chords, at: cut) && !splits(lyric, at: cut) { return cut }
+            cut -= 1
+        }
+        return width
+    }
+
     static func isSection(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return trimmed.hasPrefix("[") && trimmed.hasSuffix("]") && trimmed.count > 2
