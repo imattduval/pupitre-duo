@@ -11,7 +11,7 @@ struct Song: Codable, Identifiable, Equatable {
     var text: String?
     var transpose = 0
     var speed: Double = 30
-    var scale: Double = 1
+    var scale: Double = 1.4
 
     var id: String { url }
     var isReady: Bool { text != nil }
@@ -52,6 +52,12 @@ final class Library {
         if let data = try? Data(contentsOf: file),
            let saved = try? JSONDecoder().decode([Song].self, from: data) {
             songs = saved
+        }
+        // Une seule fois : l'ancienne taille par défaut (100 %) passe à 140 %.
+        if !UserDefaults.standard.bool(forKey: "taille.140") {
+            for index in songs.indices where songs[index].scale == 1 { songs[index].scale = 1.4 }
+            save()
+            UserDefaults.standard.set(true, forKey: "taille.140")
         }
         loadAccount()
     }
