@@ -18,6 +18,7 @@ struct LibraryView: View {
     @State private var isSearchPresented = false
     @FocusState private var isSearchFocused: Bool
     @AppStorage("playlist.ouverte") private var savedPlaylist = ""
+    @AppStorage("playlists.favorites") private var savedFavorites = ""
 
     private var scope: [Song] { library.songs(in: playlist) }
 
@@ -36,6 +37,9 @@ struct LibraryView: View {
         NavigationStack {
             ScrollViewReader { proxy in
             List {
+                if query.isEmpty, !library.songs.isEmpty {
+                    favoritesSection
+                }
                 if !filtered.isEmpty {
                     Section(countLabel) {
                         ForEach(filtered) { row($0) }
@@ -57,7 +61,7 @@ struct LibraryView: View {
                     }
                 }
             }
-            .contentMargins(.trailing, query.isEmpty ? 40 : 0, for: .scrollContent)
+            .padding(.trailing, query.isEmpty ? 46 : 0)
             .overlay(alignment: .trailing) {
                 if query.isEmpty, !filtered.isEmpty {
                     alphabetBar(proxy)
@@ -118,6 +122,9 @@ struct LibraryView: View {
             if let index = arguments.firstIndex(of: "-ouvrir"), index + 1 < arguments.count {
                 playing = library.ready.first { $0.title.localizedCaseInsensitiveContains(arguments[index + 1]) }
             }
+            if let index = arguments.firstIndex(of: "-favoris"), index + 1 < arguments.count {
+                savedFavorites = arguments[index + 1].replacingOccurrences(of: ",", with: "\n")
+            }
             if arguments.contains("-boutonRecherche") {
                 try? await Task.sleep(for: .seconds(2))
                 openSearch()
@@ -138,6 +145,63 @@ struct LibraryView: View {
         }
     }
 
+    private var favoriteNames: [String] {
+        savedFavorites.split(separator: "\n").map(String.init)
+    }
+
+    private var favorites: [Playlist] {
+        let all = library.playlists + library.decadePlaylists + library.languagePlaylists
+        return favoriteNames.compactMap { name in all.first { $0.name == name } }
+    }
+
+    private func toggleFavorite(_ name: String) {
+        var names = favoriteNames
+        if let index = names.firstIndex(of: name) { names.remove(at: index) } else { names.append(name) }
+        savedFavorites = names.joined(separator: "\n")
+    }
+
+    /// Grosses tuiles en haut de l'accueil pour passer d'une playlist favorite à l'autre.
+    private var favoritesSection: some View {
+        Section {
+            if favorites.isEmpty {
+                Button {
+                    isChoosingPlaylist = true
+                } label: {
+                    Label("Choisir mes playlists favorites", systemImage: "star")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.chord)
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                    favoriteTile("Tous mes tabs", count: library.songs.count, isSelected: playlist == nil) { select(nil) }
+                    ForEach(favorites) { item in
+                        favoriteTile(item.name, count: item.ids.count, isSelected: playlist?.name == item.name) { select(item) }
+                    }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+        }
+    }
+
+    private func favoriteTile(_ name: String, count: Int, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.title3.bold()).lineLimit(2).minimumScaleFactor(0.7)
+                Text("\(count)").font(.subheadline).monospacedDigit().opacity(0.7)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .background(isSelected ? Palette.chord : Palette.panel, in: .rect(cornerRadius: 14))
+            .foregroundStyle(isSelected ? Color.black : Color.white)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
     private static let letters = (65...90).map { String(UnicodeScalar($0)) } + ["#"]
 
     /// Grosses lettres à droite : toucher ou glisser le doigt va au premier titre de la lettre.
@@ -147,7 +211,8 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 ForEach(Self.letters, id: \.self) { letter in
                     Text(letter)
-                        .font(.system(size: min(20, geometry.size.height / 27 * 0.8), weight: .bold))
+                        .font(.system(size: min(26, geometry.size.height / 27 * 0.95), weight: .heavy))
+                        .minimumScaleFactor(0.5)
                         .foregroundStyle(present.contains(letter) ? Palette.chord : Color.secondary.opacity(0.35))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -164,8 +229,8 @@ struct LibraryView: View {
                 }
             }.onEnded { _ in activeLetter = nil })
         }
-        .frame(width: 44)
-        .padding(.bottom, 64)
+        .frame(width: 46)
+        .padding(.bottom, 56)
         .accessibilityHidden(true)
     }
 
@@ -214,10 +279,22 @@ struct LibraryView: View {
         if !items.isEmpty {
             Section(title) {
                 ForEach(items) { item in
-                    Button {
-                        select(item)
-                    } label: {
-                        chooserLabel(item.name, count: item.ids.count, selected: playlist?.name == item.name)
+                    HStack(spacing: 0) {
+                        Button {
+                            select(item)
+                        } label: {
+                            chooserLabel(item.name, count: item.ids.count, selected: playlist?.name == item.name)
+                        }
+                        Button {
+                            toggleFavorite(item.name)
+                        } label: {
+                            Image(systemName: favoriteNames.contains(item.name) ? "star.fill" : "star")
+                                .font(.title2)
+                                .foregroundStyle(Palette.chord)
+                                .frame(width: 56, height: 52)
+                                .contentShape(.rect)
+                        }
+                        .accessibilityLabel(favoriteNames.contains(item.name) ? "Retirer des favoris" : "Mettre en favori")
                     }
                 }
             }
