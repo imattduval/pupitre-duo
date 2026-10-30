@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#111214">
+<link rel="manifest" href="manifest.json">
+<title>Pupitre</title>
+<style>
+:root{--bg:#111214;--panel:#1b1d21;--line:#2c2f35;--text:#f3f1ec;--muted:#9a9ca3;--chord:#ffc85c;--section:#7fb6ff;color-scheme:dark}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:17px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+button,input{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-height:48px;min-width:48px;padding:0 12px;cursor:pointer}
+button.primary{background:var(--chord);border-color:var(--chord);color:#191510;font-weight:650}
+a{color:inherit}
+[hidden]{display:none!important}
+
+#library{max-width:760px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px)}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+h1{font-size:30px;margin:0;letter-spacing:-.02em}
+#search{width:100%;height:48px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 14px;margin-bottom:8px}
+.count{color:var(--muted);font-size:14px;margin:8px 2px 10px}
+.song{display:flex;align-items:center;gap:12px;width:100%;min-height:62px;padding:8px 2px;background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;text-align:left;text-decoration:none}
+.song .t{font-weight:600;display:block}
+.song .a{color:var(--muted);font-size:14px;display:block}
+.song .main{flex:1;min-width:0}
+.song .todo{color:var(--chord);font-size:14px;white-space:nowrap}
+.empty{color:var(--muted);padding:32px 0}
+
+#setup{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px}
+#setup h2{font-size:18px;margin:0 0 8px}
+#setup ol{margin:0 0 12px;padding-left:22px}
+#setup li{margin:6px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+#paste{width:100%;min-height:120px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0;font:14px ui-monospace,Menlo,monospace}
+
+#player{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg)}
+#bar{display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 6px) 10px 6px;border-bottom:1px solid var(--line)}
+#bar .names{flex:1;min-width:0}
+#bar .names b,#bar .names span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bar .names span{color:var(--muted);font-size:13px}
+#sheet{flex:1;overflow:auto;padding:14px 16px 55vh;-webkit-overflow-scrolling:touch}
+#sheet pre{margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.28;white-space:pre}
+#sheet .c{color:var(--chord);font-weight:700}
+#sheet .s{color:var(--section);font-weight:700;display:inline-block;margin-top:.5em}
+#controls{display:flex;align-items:stretch;gap:8px;padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);border-top:1px solid var(--line);background:var(--panel);flex-wrap:wrap;justify-content:center}
+#controls button{background:var(--bg)}
+#controls button.primary{background:var(--chord);min-width:120px}
+#controls button.on{border-color:var(--chord);color:var(--chord)}
+.group{display:flex;align-items:center;gap:4px}
+.group label{color:var(--muted);font-size:12px;min-width:44px;text-align:center;line-height:1.15}
+.group label b{display:block;color:var(--text);font-size:15px}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 90px);transform:translateX(-50%);background:#000;border:1px solid var(--line);padding:10px 14px;border-radius:12px;max-width:90vw}
+</style>
+</head>
+<body>
+
+<main id="library">
+  <header class="top">
+    <h1>Pupitre</h1>
+    <button id="toggleSetup">Réglages</button>
+  </header>
+  <section id="setup" hidden>
+    <h2>Installer le bouton d'import</h2>
+    <ol>
+      <li>Dans Safari, ajoute cette page à tes signets, puis nomme ce signet « Vers Pupitre ».</li>
+      <li>Touche ci-dessous « Copier le bouton ».</li>
+      <li>Modifie le signet et remplace son adresse par ce que tu viens de copier.</li>
+      <li>Sur ta playlist ou sur un morceau, ouvre tes signets et touche « Vers Pupitre ».</li>
+    </ol>
+    <div class="row">
+      <button id="copyBookmarklet" class="primary">Copier le bouton</button>
+      <button id="backup">Sauvegarder</button>
+      <button id="restore">Restaurer</button>
+      <input id="restoreFile" type="file" accept="application/json" hidden>
+    </div>
+    <h2 style="margin-top:16px">Ajouter un morceau à la main</h2>
+    <textarea id="paste" placeholder="Artiste - Titre sur la première ligne, puis les accords et les paroles"></textarea>
+    <button id="addPaste">Ajouter</button>
+  </section>
+  <input id="search" type="search" placeholder="Chercher un morceau ou un artiste" autocomplete="off">
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+</main>
+
+<section id="player" hidden>
+  <div id="bar">
+    <button id="back" aria-label="Retour à la liste">‹</button>
+    <div class="names"><b id="pTitle"></b><span id="pArtist"></span></div>
+    <button id="prev" aria-label="Morceau précédent">⏮</button>
+    <button id="next" aria-label="Morceau suivant">⏭</button>
+  </div>
+  <div id="sheet"><pre id="pre"></pre></div>
+  <div id="controls">
+    <button id="play" class="primary">Défiler</button>
+    <div class="group"><button id="slower" aria-label="Moins vite">−</button><label>Vitesse<b id="speedV"></b></label><button id="faster" aria-label="Plus vite">+</button></div>
+    <div class="group"><button id="down" aria-label="Baisser d'un demi-ton">♭</button><label>Ton<b id="keyV"></b></label><button id="up" aria-label="Monter d'un demi-ton">♯</button></div>
+    <div class="group"><button id="smaller" aria-label="Texte plus petit">A−</button><button id="bigger" aria-label="Texte plus grand">A+</button></div>
+    <button id="lyrics">Paroles seules</button>
+  </div>
+</section>
+<div id="toast" hidden></div>
+
+<script>
+const KEY='pupitre.v1';
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let db=load(),cur=null,playing=false,lyricsOnly=false,raf=0,last=0,acc=0,wake=null;
+
+function load(){try{return JSON.parse(localStorage.getItem(KEY))||{songs:[]}}catch{return{songs:[]}}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch{toast("Enregistrement impossible sur cet appareil")}}
+function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3000)}
+const sameUrl=(a,b)=>a&&b&&a.split('?')[0]===b.split('?')[0];
+
+// Import : le contenu arrive dans le fragment (#), qui n'est jamais envoyé au serveur.
+function decode(h){const b=atob(h.replace(/-/g,'+').replace(/_/g,'/'));return JSON.parse(decodeURIComponent(escape(b)))}
+function receive(){
+  const m=location.hash.match(/^#import=(.+)$/);if(!m)return;
+  history.replaceState(null,'',location.pathname);
+  let d;try{d=decode(m[1])}catch{toast("Import illisible");return}
+  if(d.list){
+    let added=0;
+    for(const s of d.list){if(!db.songs.some(x=>sameUrl(x.url,s.url))){db.songs.push({...s,text:null});added++}}
+    save();toast(added+" morceaux ajoutés à la liste");
+  }else if(d.text){
+    upsert(d);save();toast("« "+d.title+" » importé");
+  }
+}
+function upsert(d){
+  const i=db.songs.findIndex(x=>sameUrl(x.url,d.url));
+  if(i>=0)Object.assign(db.songs[i],d);else db.songs.push(d);
+}
+
+// Le bouton lit seulement ce que Safari affiche déjà sur la page ouverte.
+function bookmarklet(){
+  const app=location.origin+location.pathname;
+  const code=`(function(){var A=${JSON.stringify(app)};function S(o){location.href=A+'#import='+btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}var L=[].slice.call(document.querySelectorAll('a[href*="tabs.ultimate-guitar.com/tab/"]'));var P=[].slice.call(document.querySelectorAll('pre')).sort(function(a,b){return b.innerText.length-a.innerText.length})[0];if(/\\/tab\\//.test(location.pathname)&&P){var m=document.title.match(/^(.*?)\\s+(?:CHORDS|TAB)\\b.*?\\bby\\s+(.*?)\\s+@/i);S({url:location.href.split('?')[0],title:m?m[1]:document.title,artist:m?m[2]:'',text:P.innerText.replace(/\\r/g,'')})}else if(L.length){var seen={},list=[];L.forEach(function(a){var u=a.href.split('?')[0];if(seen[u])return;seen[u]=1;var r=a.closest('tr,article,li,div');var t=a.innerText.trim();var aa='';var p=a.parentElement;while(p&&p!==document.body&&!aa){var x=p.innerText.split('\\n').map(function(s){return s.trim()}).filter(Boolean);if(x.length>1&&x.indexOf(t)>0)aa=x[x.indexOf(t)-1];p=p.parentElement;if(p&&p.querySelectorAll('a[href*="/tab/"]').length>1)break}list.push({url:u,title:t,artist:aa})});S({list:list})}else alert('Ouvre un morceau ou une playlist Ultimate Guitar.')})();`;
+  return 'javascript:'+encodeURIComponent(code);
+}
+
+function renderList(){
+  const q=$('search').value.trim().toLowerCase();
+  const songs=db.songs.map((s,i)=>({s,i})).filter(({s})=>(s.title+' '+s.artist).toLowerCase().includes(q));
+  const ready=db.songs.filter(s=>s.text).length;
+  $('count').textContent=db.songs.length?`${ready} sur ${db.songs.length} morceaux prêts`:'';
+  $('list').innerHTML=songs.length?'':`<p class="empty">${db.songs.length?'Aucun morceau trouvé.':'Aucun morceau. Ouvre Réglages pour installer le bouton, puis touche-le sur ta playlist.'}</p>`;
+  for(const {s,i} of songs){
+    const el=document.createElement(s.text?'button':'a');
+    el.className='song';
+    el.innerHTML=`<span class="main"><span class="t">${esc(s.title)}</span><span class="a">${esc(s.artist||'')}</span></span>`+(s.text?'':'<span class="todo">À importer</span>');
+    if(s.text)el.onclick=()=>openSong(i);else{el.href=s.url}
+    $('list').append(el);
+  }
+}
+
+// Accords
+const CHORD=/^\(?[A-G](?:#|b)?(?:maj|min|m|M|sus|dim|aug|add|no|omit|\+|-|°|ø|\d|\(|\)|,|#|b)*(?:\/[A-G](?:#|b)?)?\)?$/;
+const FILLER=/^(?:\||\|\||-|–|\/|%|x\d+|\d+x|\.+|:|\(|\))$/i;
+function isChordLine(l){const t=l.trim().split(/\s+/).filter(Boolean);if(!t.length)return false;let n=0;for(const w of t){if(CHORD.test(w))n++;else if(!FILLER.test(w))return false}return n>0}
+const SHARP=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'],FLAT=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const NOTE={C:0,'C#':1,Db:1,D:2,'D#':3,Eb:3,E:4,F:5,'F#':6,Gb:6,G:7,'G#':8,Ab:8,A:9,'A#':10,Bb:10,B:11,Cb:11,'E#':5,'B#':0,Fb:4};
+function moveNote(n,k,flat){return (flat?FLAT:SHARP)[((NOTE[n]+k)%12+12)%12]}
+function moveLine(l,k,flat){
+  if(!k)return l;
+  return l.replace(/(\s*)(\S+)/g,(all,sp,w)=>{
+    if(!CHORD.test(w))return all;
+    return sp+w.replace(/(^\(?|\/)([A-G](?:#|b)?)/g,(_,p,n)=>p+moveNote(n,k,flat));
+  });
+}
+// Garde les accords au-dessus de la bonne syllabe quand leur nom change de longueur.
+function transposeLine(l,k,flat){
+  if(!k)return l;
+  let out='',debt=0;
+  for(const part of l.match(/\s+|\S+/g)||[]){
+    if(/^\s/.test(part)){const keep=Math.max(1,part.length-debt);debt-=part.length-keep;out+=' '.repeat(keep)}
+    else{const m=moveLine(part,k,flat);debt+=m.length-part.length;out+=m}
+  }
+  return out;
+}
+function keyLabel(k){return k===0?'0':(k>0?'+':'')+k}
+
+function renderSheet(){
+  const s=cur,k=s.transpose||0;
+  const flats=(s.text.match(/\b[A-G]b/g)||[]).length,sharps=(s.text.match(/\b[A-G]#/g)||[]).length,flat=flats>sharps;
+  const out=[];let plain=[];
+  for(const raw of s.text.split('\n')){
+    const l=raw.replace(/\s+$/,'');
+    if(/^\s*\[[^\]]+\]\s*$/.test(l)){out.push(`<span class="s">${esc(l.trim())}</span>`);plain.push(l);continue}
+    if(isChordLine(l)){if(lyricsOnly)continue;const t=transposeLine(l,k,flat);out.push(`<span class="c">${esc(t)}</span>`);plain.push(t);continue}
+    out.push(esc(l));plain.push(l);
+  }
+  $('pre').innerHTML=out.join('\n').replace(/\n{3,}/g,'\n\n');
+  fit(plain);
+  $('keyV').textContent=keyLabel(k);
+  $('speedV').textContent=s.speed||30;
+  $('lyrics').classList.toggle('on',lyricsOnly);
+}
+// Taille calculée sur la ligne la plus longue : le texte ne revient jamais à la ligne, donc les accords restent alignés.
+function fit(lines){
+  const longest=Math.max(20,...lines.map(l=>l.length));
+  const cs=getComputedStyle($('sheet'));
+  const avail=$('sheet').clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+  const c=document.createElement('canvas').getContext('2d');c.font='100px ui-monospace,Menlo,Consolas,monospace';
+  const per=c.measureText('M').width/100;
+  const size=Math.min(34,Math.max(11,avail/(longest*per)))*(cur.scale||1);
+  $('pre').style.fontSize=size.toFixed(2)+'px';
+}
+
+function openSong(i){
+  stop();cur=db.songs[i];cur._i=undefined;
+  $('library').hidden=true;$('player').hidden=false;
+  $('pTitle').textContent=cur.title;$('pArtist').textContent=cur.artist||'';
+  lyricsOnly=false;renderSheet();$('sheet').scrollTop=0;
+}
+function closeSong(){stop();$('player').hidden=true;$('library').hidden=false;cur=null;renderList()}
+function step(d){const r=db.songs.filter(s=>s.text);if(!r.length)return;const i=r.indexOf(cur);openSong(db.songs.indexOf(r[(i+d+r.length)%r.length]))}
+
+// Défilement
+function frame(t){
+  if(!playing)return;
+  const dt=Math.min(100,t-last);last=t;acc+=(cur.speed||30)*dt/1000;
+  const whole=Math.floor(acc);
+  if(whole){acc-=whole;const sh=$('sheet');sh.scrollTop+=whole;if(sh.scrollTop+sh.clientHeight>=sh.scrollHeight-1){stop();return}}
+  raf=requestAnimationFrame(frame);
+}
+async function start(){playing=true;last=performance.now();acc=0;$('play').textContent='Pause';raf=requestAnimationFrame(frame);try{wake=await navigator.wakeLock?.request('screen')}catch{}}
+function stop(){playing=false;cancelAnimationFrame(raf);$('play').textContent='Défiler';try{wake?.release()}catch{}wake=null}
+const toggle=()=>playing?stop():start();
+
+// Actions
+$('toggleSetup').onclick=()=>$('setup').hidden=!$('setup').hidden;
+$('search').oninput=renderList;
+$('back').onclick=closeSong;
+$('prev').onclick=()=>step(-1);$('next').onclick=()=>step(1);
+$('play').onclick=toggle;
+// Toucher le texte met en pause ou relance : pratique les mains au piano.
+let moved=false;
+$('sheet').addEventListener('touchmove',()=>moved=true,{passive:true});
+$('sheet').addEventListener('click',()=>{if(!moved)toggle();moved=false});
+const change=(f)=>{f();save();renderSheet()};
+$('slower').onclick=()=>change(()=>cur.speed=Math.max(5,(cur.speed||30)-5));
+$('faster').onclick=()=>change(()=>cur.speed=Math.min(150,(cur.speed||30)+5));
+$('down').onclick=()=>change(()=>cur.transpose=(cur.transpose||0)-1);
+$('up').onclick=()=>change(()=>cur.transpose=(cur.transpose||0)+1);
+$('smaller').onclick=()=>change(()=>cur.scale=Math.max(.6,(cur.scale||1)-.1));
+$('bigger').onclick=()=>change(()=>cur.scale=Math.min(2,(cur.scale||1)+.1));
+$('lyrics').onclick=()=>{lyricsOnly=!lyricsOnly;renderSheet()};
+$('copyBookmarklet').onclick=async()=>{try{await navigator.clipboard.writeText(bookmarklet());toast("Bouton copié")}catch{prompt("Copie ce texte",bookmarklet())}};
+$('addPaste').onclick=()=>{
+  const v=$('paste').value.trim();if(!v)return;
+  const [head,...rest]=v.split('\n');const [artist,title]=head.includes(' - ')?head.split(' - ',2):['',head];
+  db.songs.push({url:'manuel:'+Date.now(),title:title.trim(),artist:artist.trim(),text:rest.join('\n')});
+  save();$('paste').value='';renderList();toast("Morceau ajouté");
+};
+$('backup').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(db)],{type:'application/json'}));a.download='pupitre-sauvegarde.json';a.click()};
+$('restore').onclick=()=>$('restoreFile').click();
+$('restoreFile').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());if(!Array.isArray(d.songs))throw 0;db=d;save();renderList();toast("Sauvegarde restaurée")}catch{toast("Fichier illisible")}};
+addEventListener('resize',()=>{if(cur)renderSheet()});
+addEventListener('hashchange',()=>{receive();renderList()});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+receive();renderList();
+</script>
+</body>
+</html>

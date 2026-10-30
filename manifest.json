@@ -1,0 +1,8 @@
+{
+  "name": "Pupitre",
+  "short_name": "Pupitre",
+  "start_url": "./",
+  "display": "browser",
+  "background_color": "#111214",
+  "theme_color": "#111214"
+}
