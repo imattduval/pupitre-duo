@@ -145,8 +145,7 @@ struct PlayerView: View {
                 .font(.headline.bold())
                 .lineLimit(1)
                 .fixedSize()
-                .padding(.horizontal, 14)
-                .frame(minHeight: 68)
+                .frame(width: 96, height: 68)
                 .background(Palette.section, in: .rect(cornerRadius: 14))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
@@ -283,8 +282,7 @@ private struct SheetView: UIViewRepresentable {
         var onScale: (Double) -> Void = { _ in }
         var onBack: () -> Void = {}
         private var pinchStart: Double = 1
-        private var pace: Double = 1
-        private var sourceLineCount = 1
+        private var pointsPerSecond: Double = 20
 
         @objc func tapped() { isPlayingBinding.wrappedValue.toggle() }
 
@@ -322,7 +320,6 @@ private struct SheetView: UIViewRepresentable {
             scale = song.scale
             let text = song.text ?? ""
             let flats = Chords.prefersFlats(text)
-            sourceLineCount = text.components(separatedBy: "\n").count
             lines = text.components(separatedBy: "\n").compactMap { raw in
                 var line = raw
                 while line.last?.isWhitespace == true { line.removeLast() }
@@ -333,6 +330,7 @@ private struct SheetView: UIViewRepresentable {
                 }
                 return Chords.Line(text: line, kind: .lyric)
             }
+            if lyricsOnly { lines = Chords.withoutInnerBlanks(lines) }
             layout()
         }
 
@@ -344,9 +342,6 @@ private struct SheetView: UIViewRepresentable {
             let unit = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)]).width / 100
             let size = min(34, max(11, available / (CGFloat(longest) * unit) - 0.1)) * scale
             let visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
-            // Garde la même durée de défilement : moins de lignes (paroles seules) ralentit,
-            // un texte plus grand ou des lignes coupées accélèrent.
-            pace = scale * Double(max(1, visible.count)) / Double(max(1, sourceLineCount))
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = size * 0.18
             paragraph.lineBreakMode = .byClipping
@@ -363,6 +358,8 @@ private struct SheetView: UIViewRepresentable {
             label.attributedText = output
             let needed = label.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
             label.frame = CGRect(x: inset, y: inset, width: available, height: needed.height)
+            // Une vitesse de 30 parcourt tout le texte en 3 min 30, quels que soient sa taille et le mode.
+            pointsPerSecond = Double(needed.height) / 210
             scroll.contentSize = CGSize(width: scroll.bounds.width,
                                         height: needed.height + inset + scroll.bounds.height * 0.55)
             scroll.contentOffset.y = position * scroll.contentSize.height
@@ -371,6 +368,10 @@ private struct SheetView: UIViewRepresentable {
         func setPlaying(_ playing: Bool) {
             if playing, link == nil {
                 accumulated = 0
+                // En fin de morceau, « Défiler » repart du début.
+                if let scroll, scroll.contentOffset.y >= scroll.contentSize.height - scroll.bounds.height - 1 {
+                    scroll.contentOffset.y = 0
+                }
                 let link = CADisplayLink(target: self, selector: #selector(tick))
                 link.add(to: .main, forMode: .common)
                 self.link = link
@@ -382,7 +383,7 @@ private struct SheetView: UIViewRepresentable {
 
         @objc private func tick(_ link: CADisplayLink) {
             guard let scroll, !scroll.isTracking, !scroll.isDecelerating else { return }
-            accumulated += CGFloat(speed * pace * (link.targetTimestamp - link.timestamp))
+            accumulated += CGFloat(speed / 30 * pointsPerSecond * (link.targetTimestamp - link.timestamp))
             let scaleFactor = scroll.traitCollection.displayScale
             let step = (accumulated * scaleFactor).rounded(.down) / scaleFactor
             guard step > 0 else { return }

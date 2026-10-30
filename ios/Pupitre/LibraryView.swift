@@ -89,6 +89,8 @@ struct LibraryView: View {
                 if !Task.isCancelled { await search() }
             }
             .navigationTitle(playlist?.name ?? "Tous mes tabs")
+            // Titre fixe : la colonne de lettres ne bouge pas pendant le défilement.
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Playlists", systemImage: "music.note.list") { isChoosingPlaylist = true }
@@ -175,7 +177,7 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.chord)
             } else {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 8)], spacing: 8) {
                     favoriteTile("Tous mes tabs", count: library.songs.count, isSelected: playlist == nil) { select(nil) }
                     ForEach(favorites) { item in
                         favoriteTile(item.name, count: item.ids.count, isSelected: playlist?.name == item.name) { select(item) }

@@ -17,6 +17,16 @@ enum Chords {
         var kind: Kind
     }
 
+    /// Sans accords, les lignes vides ne sont utiles qu'avant une nouvelle section.
+    static func withoutInnerBlanks(_ lines: [Line]) -> [Line] {
+        lines.indices.compactMap { index in
+            guard lines[index].text.trimmingCharacters(in: .whitespaces).isEmpty else { return lines[index] }
+            let next = lines[(index + 1)...].first { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+            let previousIsBlank = index > 0 && lines[index - 1].text.trimmingCharacters(in: .whitespaces).isEmpty
+            return next?.kind == .section && !previousIsBlank ? lines[index] : nil
+        }
+    }
+
     /// Passe à la ligne ce qui dépasse. Une ligne d'accords et ses paroles sont coupées
     /// à la même colonne, pour que chaque accord reste au-dessus de sa syllabe.
     static func wrap(_ lines: [Line], width: Int) -> [Line] {
