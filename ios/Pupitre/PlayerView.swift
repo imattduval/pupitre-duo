@@ -338,9 +338,10 @@ private struct SheetView: UIViewRepresentable {
             guard let scroll, scroll.bounds.width > 0 else { return }
             let inset: CGFloat = 16
             let available = scroll.bounds.width - inset * 2
-            let longest = max(20, lines.map(\.text.count).max() ?? 20)
             let unit = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)]).width / 100
-            let size = min(34, max(11, available / (CGFloat(longest) * unit) - 0.1)) * scale
+            // Taille liée à la largeur de l'écran, pas à la ligne la plus longue : une longue ligne
+            // passe à la ligne au lieu de rapetisser tout le morceau.
+            let size = max(14, available / 35) * scale
             let visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = size * 0.18
