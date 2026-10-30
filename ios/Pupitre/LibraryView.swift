@@ -13,12 +13,17 @@ struct LibraryView: View {
     @State private var message: String?
 
     @State private var playlist: Playlist?
+    @State private var isChoosingPlaylist = false
+    @State private var isSearchPresented = false
+    @FocusState private var isSearchFocused: Bool
+    @AppStorage("playlist.ouverte") private var savedPlaylist = ""
 
     private var scope: [Song] { library.songs(in: playlist) }
 
     private var filtered: [Song] {
         guard !query.isEmpty else { return scope }
-        return scope.filter { ($0.title + " " + $0.artist).localizedCaseInsensitiveContains(query) }
+        // Une recherche couvre toute la bibliothèque, pas seulement la playlist ouverte.
+        return library.songs.filter { ($0.title + " " + $0.artist).localizedStandardContains(query) }
     }
 
     private var countLabel: String {
@@ -57,20 +62,23 @@ struct LibraryView: View {
                                            description: Text("Touche la loupe, écris un titre ou un artiste, puis valide."))
                 }
             }
-            .searchable(text: $query, prompt: "Titre ou artiste")
+            .searchable(text: $query, isPresented: $isSearchPresented, prompt: "Titre ou artiste")
+            .searchFocused($isSearchFocused)
             .onSubmit(of: .search) { Task { await search() } }
-            .onChange(of: query) { _, text in
-                if text.isEmpty { results = []; searched = false }
+            .task(id: query) {
+                // Cherche seul dès que la frappe s'arrête.
+                guard query.count >= 3 else {
+                    results = []
+                    searched = false
+                    return
+                }
+                try? await Task.sleep(for: .seconds(0.7))
+                if !Task.isCancelled { await search() }
             }
             .navigationTitle(playlist?.name ?? "Tous mes tabs")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Menu("Playlists", systemImage: "music.note.list") {
-                        Button("Tous mes tabs") { playlist = nil }
-                        group("Par décennie", library.decadePlaylists)
-                        group("Par langue", library.languagePlaylists)
-                        group("Mes playlists", library.playlists)
-                    }
+                    Button("Playlists", systemImage: "music.note.list") { isChoosingPlaylist = true }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Ultimate Guitar", systemImage: "globe") {
@@ -88,6 +96,12 @@ struct LibraryView: View {
             }
         }
         .environment(loader)
+        .sheet(isPresented: $isChoosingPlaylist) { playlistChooser }
+        .task {
+            // Rouvre la dernière playlist utilisée.
+            let all = library.playlists + library.decadePlaylists + library.languagePlaylists
+            playlist = all.first { $0.name == savedPlaylist }
+        }
         #if DEBUG
         // Test sur appareil : ouvre un morceau déjà chargé (devicectl ne peut pas toucher l'écran).
         .task {
@@ -95,10 +109,19 @@ struct LibraryView: View {
             if let index = arguments.firstIndex(of: "-ouvrir"), index + 1 < arguments.count {
                 playing = library.ready.first { $0.title.localizedCaseInsensitiveContains(arguments[index + 1]) }
             }
+            if arguments.contains("-boutonRecherche") {
+                try? await Task.sleep(for: .seconds(2))
+                openSearch()
+            }
+            if let index = arguments.firstIndex(of: "-chercher"), index + 1 < arguments.count {
+                isSearchPresented = true
+                query = arguments[index + 1]
+            }
         }
         #endif
         .fullScreenCover(item: $playing) { song in
-            PlayerView(song: song, playlist: playlist)
+            PlayerView(song: song, playlist: playlist, onSearch: openSearch)
+                .environment(loader)
         }
         .sheet(item: $browsing) { target in
             BrowserView(start: target.url)
@@ -106,15 +129,72 @@ struct LibraryView: View {
         }
     }
 
-    @ViewBuilder
-    private func group(_ title: String, _ items: [Playlist]) -> some View {
-        if !items.isEmpty {
-            Menu(title) {
-                ForEach(items) { item in
-                    Button("\(item.name) · \(item.ids.count)") { playlist = item }
+    private func openSearch() {
+        playing = nil
+        query = ""
+        isSearchPresented = true
+        Task {
+            // Le clavier ne s'ouvre qu'une fois le lecteur refermé.
+            try? await Task.sleep(for: .seconds(0.6))
+            isSearchFocused = true
+        }
+    }
+
+    private func select(_ item: Playlist?) {
+        playlist = item
+        savedPlaylist = item?.name ?? ""
+        isChoosingPlaylist = false
+    }
+
+    private var playlistChooser: some View {
+        NavigationStack {
+            List {
+                Button {
+                    select(nil)
+                } label: {
+                    chooserLabel("Tous mes tabs", count: library.songs.count, selected: playlist == nil)
+                }
+                chooserSection("Mes playlists", library.playlists)
+                chooserSection("Par décennie", library.decadePlaylists)
+                chooserSection("Par langue", library.languagePlaylists)
+            }
+            .buttonStyle(.plain)
+            .navigationTitle("Playlists")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fermer") { isChoosingPlaylist = false }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func chooserSection(_ title: String, _ items: [Playlist]) -> some View {
+        if !items.isEmpty {
+            Section(title) {
+                ForEach(items) { item in
+                    Button {
+                        select(item)
+                    } label: {
+                        chooserLabel(item.name, count: item.ids.count, selected: playlist?.name == item.name)
+                    }
+                }
+            }
+        }
+    }
+
+    private func chooserLabel(_ name: String, count: Int, selected: Bool) -> some View {
+        HStack {
+            Text(name).font(.headline)
+            Spacer()
+            Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
+            if selected {
+                Image(systemName: "checkmark").foregroundStyle(Palette.chord)
+            }
+        }
+        .frame(minHeight: 52)
+        .contentShape(.rect)
     }
 
     private func row(_ song: Song) -> some View {
@@ -178,21 +258,22 @@ struct LibraryView: View {
         isSearching = true
         defer { isSearching = false; searched = true }
         do {
-            results = try await loader.search(text)
-                .sorted { ($0.votes ?? 0) > ($1.votes ?? 0) }
+            let found = try await loader.search(text)
+            guard query.trimmingCharacters(in: .whitespaces) == text else { return }
+            results = found.sorted { ($0.votes ?? 0) > ($1.votes ?? 0) }
         } catch LoadError.needsBrowser {
             results = []
             show("Ultimate Guitar demande une vérification.")
             browsing = BrowserTarget(url: Self.home)
         } catch {
             results = []
-            show("Recherche indisponible sur ce réseau. Essaie en Wi-Fi.")
+            show("Ultimate Guitar ne répond pas sur ce réseau. Essaie en Wi-Fi.")
         }
     }
 
     /// Charge le morceau choisi en arrière-plan, l'enregistre sur le téléphone et l'ouvre.
     private func open(url: String, fallbackTitle: String? = nil, fallbackArtist: String? = nil) async {
-        if let saved = library.songs.first(where: { $0.url == url && $0.isReady }) {
+        if let saved = library.song(matching: url), saved.isReady {
             playing = saved
             return
         }
@@ -204,7 +285,7 @@ struct LibraryView: View {
                           title: fallbackTitle ?? loaded.title,
                           artist: fallbackArtist ?? loaded.artist,
                           text: loaded.text)
-            playing = library.songs.first { $0.url == url }
+            playing = library.song(matching: url)
         } catch LoadError.needsBrowser {
             browsing = URL(string: url).map { BrowserTarget(url: $0) }
         } catch {

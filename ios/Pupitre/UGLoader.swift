@@ -42,13 +42,50 @@ final class UGLoader {
     }()
 
     func search(_ query: String) async throws -> [SearchResult] {
-        var parts = URLComponents(string: "https://www.ultimate-guitar.com/search.php")!
-        parts.queryItems = [
-            URLQueryItem(name: "search_type", value: "title"),
-            URLQueryItem(name: "value", value: query),
-        ]
-        let json = try await run(url: parts.url!, script: Self.searchScript)
-        return try JSONDecoder().decode([SearchResult].self, from: Data(json.utf8))
+        isBusy = true
+        defer { isBusy = false }
+        attachIfNeeded()
+        try await openSearchOrigin()
+        var found = try await searchPages(query)
+        // UG exige tous les mots : « La foule sentimentale » trouve mieux sans son article.
+        let short = query.replacing(/^(?i)(la|le|les|l'|un|une|the)\s*/, with: "")
+        if found.count < 5, short != query, !short.isEmpty {
+            let more = try await searchPages(short)
+            found += more.filter { item in !found.contains { $0.url == item.url } }
+        }
+        return found
+    }
+
+    private func searchPages(_ query: String) async throws -> [SearchResult] {
+        var found: [SearchResult] = []
+        for page in 1...2 {
+            let answer = try await webView.callAsyncJavaScript(Self.searchScript,
+                                                               arguments: ["q": query, "page": page],
+                                                               contentWorld: .page) as? String
+            if answer == "blocked" { throw LoadError.needsBrowser }
+            guard let answer else { throw LoadError.failed }
+            let result = try JSONDecoder().decode(SearchPage.self, from: Data(answer.utf8))
+            found += result.results
+            if page >= result.pages || found.count >= 25 { break }
+        }
+        return found
+    }
+
+    /// La recherche se fait depuis une page d'UG : ses données disparaissent de la page affichée,
+    /// il faut donc relire le document d'origine.
+    private func openSearchOrigin() async throws {
+        guard webView.url?.host != "www.ultimate-guitar.com" else { return }
+        webView.load(URLRequest(url: URL(string: "https://www.ultimate-guitar.com/search.php?search_type=title&value=a")!))
+        for _ in 0..<30 {
+            try await Task.sleep(for: .milliseconds(500))
+            if webView.url?.host == "www.ultimate-guitar.com", !webView.isLoading { return }
+        }
+        throw LoadError.failed
+    }
+
+    private struct SearchPage: Decodable {
+        let pages: Int
+        let results: [SearchResult]
     }
 
     func song(at url: String) async throws -> LoadedSong {
@@ -86,26 +123,16 @@ final class UGLoader {
     private static let blockCheck = #"if(/just a moment|verify you are human|captcha/i.test(document.title+' '+(document.body?document.body.innerText.slice(0,300):'')))return 'blocked';"#
 
     private static let searchScript = #"""
-    (function(){
-      \#(blockCheck)
-      var out=[];
-      var store=document.querySelector('.js-store');
-      if(store){try{
-        var results=JSON.parse(store.dataset.content).store.page.data.results||[];
-        results.forEach(function(r){
-          if(r.type==='Chords'&&r.tab_url)out.push({url:r.tab_url,title:r.song_name||'',artist:r.artist_name||'',version:r.version||null,rating:r.rating||null,votes:r.votes||null});
-        });
-        return JSON.stringify(out);
-      }catch(e){}}
-      var seen={};
-      [].slice.call(document.querySelectorAll('a[href*="tabs.ultimate-guitar.com/tab/"]')).forEach(function(a){
-        var u=a.href.split('?')[0];
-        if(seen[u]||!/-chords-\d+$/.test(u))return;seen[u]=1;
-        var slug=(u.split('/tab/')[1]||'').split('/')[0].replace(/-/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase()});
-        out.push({url:u,title:a.innerText.trim(),artist:slug,version:null,rating:null,votes:null});
-      });
-      return out.length?JSON.stringify(out):null;
-    })()
+    const response = await fetch('/search.php?search_type=title&value=' + encodeURIComponent(q) + '&page=' + page, {credentials: 'include'});
+    const html = await response.text();
+    const store = new DOMParser().parseFromString(html, 'text/html').querySelector('.js-store');
+    if (!store) return /just a moment|verify you are human|captcha/i.test(html) ? 'blocked' : null;
+    const data = JSON.parse(store.dataset.content).store.page.data;
+    const results = (data.results || []).filter(r => r.type === 'Chords' && r.tab_url).map(r => ({
+      url: r.tab_url, title: r.song_name || '', artist: r.artist_name || '',
+      version: r.version || null, rating: r.rating || null, votes: r.votes || null
+    }));
+    return JSON.stringify({pages: (data.pagination && data.pagination.total) || 1, results});
     """#
 
     private static let songScript = #"""

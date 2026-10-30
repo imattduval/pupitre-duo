@@ -4,6 +4,8 @@ Reprend là où il s'est arrêté grâce au cache. Usage : classer.py compte.jso
 import json, os, re, sys, time, unicodedata, urllib.parse, urllib.request
 
 compte, sortie, cache_path = sys.argv[1:4]
+# « export » : écrit le classement avec ce que le cache connaît déjà, sans réseau.
+EXPORT = sys.argv[4:] == ["export"]
 AGENT = "PupitreDuo/1.0 (https://github.com/imattduval/pupitre-duo)"
 cache = json.load(open(cache_path)) if os.path.exists(cache_path) else {}
 
@@ -45,6 +47,8 @@ def lookup(title, artist):
 
 def country(artist_id):
     key = "artist:" + artist_id
+    if EXPORT:
+        return cache.get(key)
     if key not in cache:
         data = get("artist/" + artist_id + "?fmt=json")
         if data is None:
@@ -71,6 +75,10 @@ data = json.load(open(compte, encoding="utf-8"))
 result = {}
 for index, song in enumerate(data["songs"]):
     key = str(song["id"])
+    if EXPORT and key not in cache:
+        title = re.sub(r"\s*\(ver \d+\)$", "", song["title"])
+        result[key] = {"decade": None, "language": language(title, None)}
+        continue
     if key not in cache:
         title = re.sub(r"\s*\(ver \d+\)$", "", song["title"])
         artist = re.split(r"\s+(?:feat\.?|&|and)\s+", song["artist"], flags=re.I)[0]
@@ -83,10 +91,11 @@ for index, song in enumerate(data["songs"]):
     land = country(found["artist"]) if found.get("artist") else None
     title = re.sub(r"\s*\(ver \d+\)$", "", song["title"])
     result[key] = {"decade": found["year"] // 10 * 10 if found.get("year") else None, "language": language(title, land)}
-    if index % 20 == 0:
+    if index % 20 == 0 and not EXPORT:
         json.dump(cache, open(cache_path, "w"))
         print(index, flush=True)
 
-json.dump(cache, open(cache_path, "w"))
+if not EXPORT:
+    json.dump(cache, open(cache_path, "w"))
 json.dump(result, open(sortie, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
 print("fini", len(result), "sur", len(data["songs"]), flush=True)

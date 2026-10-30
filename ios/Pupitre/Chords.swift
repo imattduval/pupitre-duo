@@ -2,7 +2,7 @@ import Foundation
 
 enum Chords {
     private static let chord = /^\(?[A-G](?:#|b)?(?:maj|min|m|M|sus|dim|aug|add|no|omit|\+|-|°|ø|\d|\(|\)|,|#|b)*(?:\/[A-G](?:#|b)?)?\)?$/
-    private static let filler = /^(?:\||\|\||-|–|\/|%|[xX]\d+|\d+[xX]|\.+|:|\(|\))$/
+    private static let filler = /^(?:\||\|\||-|–|\/|%|[xX]\d{1,2}|\d{1,2}[xX]|\.+|:|\(|\))$/
     private static let root = /(^\(?|\/)([A-G](?:#|b)?)/
     private static let sharps = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     private static let flats = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]

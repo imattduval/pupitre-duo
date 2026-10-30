@@ -156,8 +156,15 @@ final class Library {
         return added
     }
 
+    /// Le même morceau peut avoir deux formes de lien : on compare aussi le numéro UG.
+    func song(matching url: String) -> Song? {
+        let id = Song(url: url, title: "", artist: "").tabID
+        return songs.first { $0.url == url || (id != nil && $0.tabID == id) }
+    }
+
     func store(url: String, title: String, artist: String, text: String) {
-        if let index = songs.firstIndex(where: { $0.url == url }) {
+        let id = Song(url: url, title: "", artist: "").tabID
+        if let index = songs.firstIndex(where: { $0.url == url || (id != nil && $0.tabID == id) }) {
             songs[index].text = text
             songs[index].language = detectLanguage(text)
             if songs[index].artist.isEmpty { songs[index].artist = artist }
@@ -179,7 +186,7 @@ final class Library {
     }
 
     func neighbour(of song: Song, step: Int, in playlist: Playlist?) -> Song? {
-        let list = songs(in: playlist).filter(\.isReady)
+        let list = songs(in: playlist)
         guard !list.isEmpty, let index = list.firstIndex(where: { $0.url == song.url }) else { return nil }
         return list[(index + step + list.count) % list.count]
     }
