@@ -283,6 +283,8 @@ private struct SheetView: UIViewRepresentable {
         var onScale: (Double) -> Void = { _ in }
         var onBack: () -> Void = {}
         private var pinchStart: Double = 1
+        private var pace: Double = 1
+        private var sourceLineCount = 1
 
         @objc func tapped() { isPlayingBinding.wrappedValue.toggle() }
 
@@ -320,6 +322,7 @@ private struct SheetView: UIViewRepresentable {
             scale = song.scale
             let text = song.text ?? ""
             let flats = Chords.prefersFlats(text)
+            sourceLineCount = text.components(separatedBy: "\n").count
             lines = text.components(separatedBy: "\n").compactMap { raw in
                 var line = raw
                 while line.last?.isWhitespace == true { line.removeLast() }
@@ -341,6 +344,9 @@ private struct SheetView: UIViewRepresentable {
             let unit = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)]).width / 100
             let size = min(34, max(11, available / (CGFloat(longest) * unit) - 0.1)) * scale
             let visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
+            // Garde la même durée de défilement : moins de lignes (paroles seules) ralentit,
+            // un texte plus grand ou des lignes coupées accélèrent.
+            pace = scale * Double(max(1, visible.count)) / Double(max(1, sourceLineCount))
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = size * 0.18
             paragraph.lineBreakMode = .byClipping
@@ -376,7 +382,7 @@ private struct SheetView: UIViewRepresentable {
 
         @objc private func tick(_ link: CADisplayLink) {
             guard let scroll, !scroll.isTracking, !scroll.isDecelerating else { return }
-            accumulated += CGFloat(speed * (link.targetTimestamp - link.timestamp))
+            accumulated += CGFloat(speed * pace * (link.targetTimestamp - link.timestamp))
             let scaleFactor = scroll.traitCollection.displayScale
             let step = (accumulated * scaleFactor).rounded(.down) / scaleFactor
             guard step > 0 else { return }

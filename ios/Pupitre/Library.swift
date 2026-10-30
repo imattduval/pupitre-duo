@@ -186,7 +186,9 @@ final class Library {
     }
 
     func neighbour(of song: Song, step: Int, in playlist: Playlist?) -> Song? {
-        let list = songs(in: playlist)
+        // Un morceau ouvert depuis la recherche peut être hors de la playlist active.
+        let scoped = songs(in: playlist)
+        let list = scoped.contains { $0.url == song.url } ? scoped : songs
         guard !list.isEmpty, let index = list.firstIndex(where: { $0.url == song.url }) else { return nil }
         return list[(index + step + list.count) % list.count]
     }
