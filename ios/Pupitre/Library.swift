@@ -27,6 +27,18 @@ final class Library {
            let saved = try? JSONDecoder().decode([Song].self, from: data) {
             songs = saved
         }
+        addPlaylistOnce()
+    }
+
+    /// Ajoute une seule fois les titres de la playlist : un morceau supprimé ne revient pas.
+    private func addPlaylistOnce() {
+        let key = "playlist.ajoutee"
+        guard !UserDefaults.standard.bool(forKey: key),
+              let address = Bundle.main.url(forResource: "playlist", withExtension: "json"),
+              let data = try? Data(contentsOf: address),
+              let items = try? JSONDecoder().decode([ImportedLink].self, from: data) else { return }
+        addList(items)
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     var readyCount: Int { songs.filter(\.isReady).count }

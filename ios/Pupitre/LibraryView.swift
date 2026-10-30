@@ -151,7 +151,7 @@ struct LibraryView: View {
             browsing = BrowserTarget(url: Self.home)
         } catch {
             results = []
-            show("Recherche impossible. Vérifie le réseau.")
+            show("Recherche indisponible sur ce réseau. Essaie en Wi-Fi.")
         }
     }
 
