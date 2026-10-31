@@ -49,8 +49,6 @@ struct PlayerView: View {
                           startOffset: resume ? SheetView.lastOffset : nil,
                           topInset: 0,
                           sideInset: isClosed && isWide ? 8 : 16,
-                          // Paysage fermé : même taille de lettres avec ou sans la colonne de commandes.
-                          fontWidth: isClosed && isWide ? proxy.size.width + insets.leading + insets.trailing - 138 : nil,
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() },
                           onTap: textTapped)
@@ -67,7 +65,7 @@ struct PlayerView: View {
                         }
                     }
               }
-              // Les commandes se replient : le texte gagne leur hauteur en vertical, leur largeur en paysage.
+              // Les commandes se replient et le texte gagne leur hauteur.
               if !controlsHidden {
               Divider()
               Group {
@@ -97,9 +95,8 @@ struct PlayerView: View {
                     }
                     .accessibilityLabel("Afficher les commandes")
                     .foregroundStyle(.primary)
-                    // En paysage, la pastille reste au-dessus de la caméra quand celle-ci arrive en bas à droite.
                     .padding(.trailing, 16)
-                    .padding(.bottom, isWide ? 76 : 24)
+                    .padding(.bottom, 24)
                     .transition(.opacity)
                 }
             }
@@ -109,8 +106,9 @@ struct PlayerView: View {
         // Écran fermé en vertical : l'heure et le réseau laissent la place au morceau. Ouvert, on les garde.
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width && $0.size.width < 560 } action: { hidesStatusBar = $0 }
         .statusBarHidden(hidesStatusBar)
-        .onGeometryChange(for: Bool.self) { min($0.size.width, $0.size.height) < 560 } action: { isClosedScreen = $0 }
-        // Écran fermé : pendant le défilement, les commandes s'effacent après 10 secondes sans y toucher.
+        // Écran fermé en vertical seulement ; en paysage, les commandes restent : élargir le texte le ferait sauter.
+        .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width && $0.size.width < 560 } action: { isClosedScreen = $0 }
+        // Pendant le défilement, les commandes s'effacent après 10 secondes sans y toucher.
         .task(id: "\(isPlaying)-\(isClosedScreen)-\(controlsActivity)") {
             guard isPlaying, isClosedScreen else {
                 withAnimation(.easeOut(duration: 0.25)) { controlsHidden = false }
@@ -461,7 +459,6 @@ struct SheetView: UIViewRepresentable {
     let startOffset: CGFloat?
     let topInset: CGFloat
     let sideInset: CGFloat
-    let fontWidth: CGFloat?
     let onScale: (Double) -> Void
     let onBack: () -> Void
     let onTap: () -> Void
@@ -494,8 +491,7 @@ struct SheetView: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.isPlayingBinding = $isPlaying
         coordinator.speed = song.speed
-        if coordinator.topInset != topInset || coordinator.sideInset != sideInset || coordinator.fontWidth != fontWidth {
-            coordinator.fontWidth = fontWidth
+        if coordinator.topInset != topInset || coordinator.sideInset != sideInset {
             coordinator.topInset = topInset
             coordinator.sideInset = sideInset
             coordinator.layout()
@@ -533,7 +529,6 @@ struct SheetView: UIViewRepresentable {
         var pendingOffset: CGFloat?
         var topInset: CGFloat = 0
         var sideInset: CGFloat = 16
-        var fontWidth: CGFloat?
 
         @objc func tapped() { onTap() }
 
@@ -592,7 +587,7 @@ struct SheetView: UIViewRepresentable {
             let unit = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)]).width / 100
             // Taille liée à la largeur de l'écran, pas à la ligne la plus longue : une longue ligne
             // passe à la ligne au lieu de rapetisser tout le morceau.
-            let size = max(14, (fontWidth ?? available) / 35) * scale
+            let size = max(14, available / 35) * scale
             let visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = size * 0.18
