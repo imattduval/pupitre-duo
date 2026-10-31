@@ -14,7 +14,6 @@ struct LibraryView: View {
 
     @State private var playlist: Playlist?
     @State private var activeLetter: String?
-    @State private var isKeyboardVisible = false
     @State private var isClosedScreen = false
     @State private var areFavoritesOpen = false
     @State private var isChoosingPlaylist = false
@@ -31,8 +30,7 @@ struct LibraryView: View {
         return library.songs.filter { ($0.title + " " + $0.artist).localizedStandardContains(query) }
     }
 
-    // Le clavier réduit la hauteur disponible : les lettres disparaissent au lieu de rétrécir.
-    private var showsAlphabet: Bool { query.isEmpty && !filtered.isEmpty && !isKeyboardVisible }
+    private var showsAlphabet: Bool { query.isEmpty && !filtered.isEmpty }
 
     /// Tous mes tabs et les listes automatiques sont triés par titre. Une playlist du compte
     /// garde son ordre, celui du set, donc pas de séparation par lettre.
@@ -98,11 +96,14 @@ struct LibraryView: View {
                     }
                 }
             }
-            .padding(.trailing, showsAlphabet ? 46 : 0)
+            // Largeur fixe : la liste ne bouge pas quand les lettres s'effacent.
+            .padding(.trailing, 46)
             .overlay(alignment: .trailing) {
-                if showsAlphabet {
-                    alphabetBar(proxy)
-                }
+                alphabetBar(proxy)
+                    .opacity(showsAlphabet ? 1 : 0)
+                    .allowsHitTesting(showsAlphabet)
+                    // Le clavier passe par-dessus : les lettres gardent leur taille et leur place.
+                    .ignoresSafeArea(.keyboard)
             }
             }
             .overlay {
@@ -114,6 +115,8 @@ struct LibraryView: View {
             }
             .searchable(text: $query, isPresented: $isSearchPresented, prompt: "Titre ou artiste")
             .searchFocused($isSearchFocused)
+            // Garde la barre du haut pendant la recherche, sinon tout remonte d'un coup.
+            .searchPresentationToolbarBehavior(.avoidHidingContent)
             .onSubmit(of: .search) { Task { await search() } }
             .task(id: query) {
                 // Cherche seul dès que la frappe s'arrête.
@@ -149,17 +152,16 @@ struct LibraryView: View {
         }
         .environment(loader)
         // L'écran fermé fait 466 points sur son petit côté, l'écran ouvert plus de 620.
-        .onGeometryChange(for: Bool.self) { min($0.size.width, $0.size.height) < 560 } action: { closed in
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-ferme") { isClosedScreen = true; return }
-            #endif
-            isClosedScreen = closed
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            isKeyboardVisible = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            isKeyboardVisible = false
+        // Mesuré sans le clavier : l'ouvrir ne doit pas faire croire à l'écran fermé.
+        .background {
+            Color.clear
+                .onGeometryChange(for: Bool.self) { min($0.size.width, $0.size.height) < 560 } action: { closed in
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-ferme") { isClosedScreen = true; return }
+                    #endif
+                    isClosedScreen = closed
+                }
+                .ignoresSafeArea(.keyboard)
         }
         .sheet(isPresented: $isChoosingPlaylist) { playlistChooser }
         .task {
