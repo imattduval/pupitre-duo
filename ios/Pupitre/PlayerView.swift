@@ -19,6 +19,9 @@ struct PlayerView: View {
     @State private var isPlaying = false
     @State private var lyricsOnly = false
     @State private var hidesStatusBar = false
+    @State private var isClosedScreen = false
+    @State private var controlsHidden = false
+    @State private var controlsActivity = 0
 
     var body: some View {
         GeometryReader { proxy in
@@ -47,7 +50,8 @@ struct PlayerView: View {
                           topInset: 0,
                           sideInset: isClosed && isWide ? 8 : 16,
                           onScale: { value in change { $0.scale = value } },
-                          onBack: { dismiss() })
+                          onBack: { dismiss() },
+                          onTap: textTapped)
                     .id(song.url)
                     .overlay {
                         if isLoading {
@@ -61,6 +65,9 @@ struct PlayerView: View {
                         }
                     }
               }
+              // Vertical : la barre se replie et le texte gagne sa hauteur. Paysage : elle s'efface
+              // sans libérer sa place, car élargir le texte le ferait sauter en pleine lecture.
+              if !(controlsHidden && !isWide) {
               Divider()
               Group {
                   if isWide {
@@ -75,6 +82,27 @@ struct PlayerView: View {
               }
               .padding(.bottom, isWide ? 16 : max(12, insets.bottom * 0.4))
               .background(isWide ? Palette.background : Palette.panel)
+              .opacity(controlsHidden ? 0 : 1)
+              .allowsHitTesting(!controlsHidden)
+              }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if controlsHidden {
+                    Button(action: showControls) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.title3.bold())
+                            .frame(width: 52, height: 52)
+                            .background(Palette.panel, in: .circle)
+                            .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
+                            .contentShape(.circle)
+                    }
+                    .accessibilityLabel("Afficher les commandes")
+                    .foregroundStyle(.primary)
+                    // En paysage, la pastille reste au-dessus de la caméra quand celle-ci arrive en bas à droite.
+                    .padding(.trailing, 16)
+                    .padding(.bottom, isWide ? 76 : 24)
+                    .transition(.opacity)
+                }
             }
             .ignoresSafeArea(edges: isWide ? [.top, .bottom, .leading, .trailing] : isClosedPortrait ? [.top, .bottom, .trailing] : [.top, .bottom])
         }
@@ -82,6 +110,18 @@ struct PlayerView: View {
         // Écran fermé en vertical : l'heure et le réseau laissent la place au morceau. Ouvert, on les garde.
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width && $0.size.width < 560 } action: { hidesStatusBar = $0 }
         .statusBarHidden(hidesStatusBar)
+        .onGeometryChange(for: Bool.self) { min($0.size.width, $0.size.height) < 560 } action: { isClosedScreen = $0 }
+        // Écran fermé : pendant le défilement, les commandes s'effacent après 10 secondes sans y toucher.
+        .task(id: "\(isPlaying)-\(isClosedScreen)-\(controlsActivity)") {
+            guard isPlaying, isClosedScreen else {
+                withAnimation(.easeOut(duration: 0.25)) { controlsHidden = false }
+                return
+            }
+            try? await Task.sleep(for: .seconds(10))
+            if !Task.isCancelled {
+                withAnimation(.easeOut(duration: 0.6)) { controlsHidden = true }
+            }
+        }
         .task {
             // iOS peut rendre le clavier à la recherche pendant la transition vers le lecteur.
             dismissKeyboard()
@@ -365,8 +405,19 @@ struct PlayerView: View {
         .foregroundStyle(.primary)
     }
 
+    private func showControls() {
+        withAnimation(.easeOut(duration: 0.25)) { controlsHidden = false }
+        controlsActivity += 1
+    }
+
+    /// Commandes cachées : le premier toucher les rappelle, le suivant met en pause ou relance.
+    private func textTapped() {
+        if controlsHidden { showControls() } else { isPlaying.toggle() }
+    }
+
     private func change(_ edit: (inout Song) -> Void) {
         edit(&song)
+        controlsActivity += 1
         library.update(song)
     }
 
@@ -413,6 +464,7 @@ struct SheetView: UIViewRepresentable {
     let sideInset: CGFloat
     let onScale: (Double) -> Void
     let onBack: () -> Void
+    let onTap: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(isPlaying: $isPlaying) }
 
@@ -449,6 +501,7 @@ struct SheetView: UIViewRepresentable {
         }
         coordinator.onScale = onScale
         coordinator.onBack = onBack
+        coordinator.onTap = onTap
         coordinator.render(song: song, lyricsOnly: lyricsOnly)
         coordinator.setPlaying(isPlaying)
     }
@@ -473,13 +526,14 @@ struct SheetView: UIViewRepresentable {
 
         var onScale: (Double) -> Void = { _ in }
         var onBack: () -> Void = {}
+        var onTap: () -> Void = {}
         private var pinchStart: Double = 1
         private var pointsPerSecond: Double = 20
         var pendingOffset: CGFloat?
         var topInset: CGFloat = 0
         var sideInset: CGFloat = 16
 
-        @objc func tapped() { isPlayingBinding.wrappedValue.toggle() }
+        @objc func tapped() { onTap() }
 
         @objc func pinched(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
