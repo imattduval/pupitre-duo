@@ -396,6 +396,8 @@ struct LibraryView: View {
             playing = saved
             return
         }
+        isSearchFocused = false
+        dismissKeyboard()
         loadingURL = url
         defer { loadingURL = nil }
         do {

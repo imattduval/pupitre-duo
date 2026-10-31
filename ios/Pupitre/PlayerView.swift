@@ -1,6 +1,11 @@
 import SwiftUI
 import UIKit
 
+@MainActor
+func dismissKeyboard() {
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+}
+
 struct PlayerView: View {
     @Environment(Library.self) private var library
     @Environment(\.dismiss) private var dismiss
@@ -53,6 +58,12 @@ struct PlayerView: View {
             UIApplication.shared.isIdleTimerDisabled = playing
         }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .task {
+            // iOS peut rendre le clavier à la recherche pendant la transition vers le lecteur.
+            dismissKeyboard()
+            try? await Task.sleep(for: .seconds(0.4))
+            dismissKeyboard()
+        }
     }
 
     /// Duo ouvert : l'heure occupe le haut à droite, le titre se place dans la même bande, à sa gauche.
