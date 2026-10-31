@@ -11,7 +11,8 @@ struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State var song: Song
     let playlist: Playlist?
-    let onSearch: () -> Void
+    var resume = false
+    let onSearch: (Song) -> Void
     @Environment(UGLoader.self) private var loader
     @State private var isLoading = false
     @State private var message: String?
@@ -36,6 +37,7 @@ struct PlayerView: View {
                     Divider()
                 }
                 SheetView(song: song, lyricsOnly: lyricsOnly, isPlaying: $isPlaying,
+                          startOffset: resume ? SheetView.lastOffset : nil,
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() })
                     .id(song.url)
@@ -176,7 +178,7 @@ struct PlayerView: View {
                     .contentShape(.rect)
             }
             .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
-            Button(action: onSearch) {
+            Button { onSearch(song) } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.title3.bold())
                     .frame(maxWidth: .infinity, minHeight: 46)
@@ -229,7 +231,7 @@ struct PlayerView: View {
     }
 
     private func searchButton(width: CGFloat = 76) -> some View {
-        Button(action: onSearch) {
+        Button { onSearch(song) } label: {
             Image(systemName: "magnifyingglass")
                 .font(.title2.bold())
                 .frame(width: width, height: 68)
@@ -341,10 +343,14 @@ struct PlayerView: View {
 }
 
 /// Texte à chasse fixe qui ne revient jamais à la ligne, pour garder les accords alignés.
-private struct SheetView: UIViewRepresentable {
+struct SheetView: UIViewRepresentable {
+    /// Où en était le dernier morceau refermé, pour y revenir après un clic par erreur.
+    static var lastOffset: CGFloat = 0
+
     let song: Song
     let lyricsOnly: Bool
     @Binding var isPlaying: Bool
+    let startOffset: CGFloat?
     let onScale: (Double) -> Void
     let onBack: () -> Void
 
@@ -368,6 +374,7 @@ private struct SheetView: UIViewRepresentable {
         scroll.addGestureRecognizer(back)
         scroll.panGestureRecognizer.require(toFail: back)
         context.coordinator.scroll = scroll
+        context.coordinator.pendingOffset = startOffset
         return scroll
     }
 
@@ -382,6 +389,7 @@ private struct SheetView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: UIScrollView, coordinator: Coordinator) {
+        lastOffset = uiView.contentOffset.y
         coordinator.setPlaying(false)
     }
 
@@ -402,6 +410,7 @@ private struct SheetView: UIViewRepresentable {
         var onBack: () -> Void = {}
         private var pinchStart: Double = 1
         private var pointsPerSecond: Double = 20
+        var pendingOffset: CGFloat?
 
         @objc func tapped() { isPlayingBinding.wrappedValue.toggle() }
 
@@ -483,6 +492,10 @@ private struct SheetView: UIViewRepresentable {
             scroll.contentSize = CGSize(width: scroll.bounds.width,
                                         height: needed.height + inset + scroll.bounds.height * 0.55)
             scroll.contentOffset.y = position * scroll.contentSize.height
+            if let pendingOffset, !lines.isEmpty {
+                scroll.contentOffset.y = pendingOffset
+                self.pendingOffset = nil
+            }
         }
 
         func setPlaying(_ playing: Bool) {

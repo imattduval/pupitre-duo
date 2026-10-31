@@ -14,6 +14,8 @@ struct LibraryView: View {
 
     @State private var playlist: Playlist?
     @State private var activeLetter: String?
+    @State private var searchOrigin: Song?
+    @State private var resumesPlayer = false
     @State private var isClosedScreen = false
     @State private var areFavoritesOpen = false
     @State private var isChoosingPlaylist = false
@@ -148,6 +150,24 @@ struct LibraryView: View {
                 }
             }
             .overlay(alignment: .bottom) {
+                if searchOrigin != nil, query.isEmpty {
+                    Button(action: returnToSong) {
+                        Label("Annuler – revenir à la tab", systemImage: "arrow.uturn.backward")
+                            .font(.headline)
+                            .padding(.horizontal, 20)
+                            .frame(minHeight: 52)
+                            .background(Palette.chord, in: .capsule)
+                            .foregroundStyle(.black)
+                            .contentShape(.capsule)
+                    }
+                    .padding(.bottom, 12)
+                    .task {
+                        try? await Task.sleep(for: .seconds(5))
+                        searchOrigin = nil
+                    }
+                }
+            }
+            .overlay(alignment: .bottom) {
                 if let message {
                     Text(message)
                         .padding(.horizontal, 14).padding(.vertical, 10)
@@ -195,8 +215,8 @@ struct LibraryView: View {
             }
         }
         #endif
-        .fullScreenCover(item: $playing) { song in
-            PlayerView(song: song, playlist: playlist, onSearch: openSearch)
+        .fullScreenCover(item: $playing, onDismiss: { resumesPlayer = false }) { song in
+            PlayerView(song: song, playlist: playlist, resume: resumesPlayer, onSearch: { openSearch(from: $0) })
                 .environment(loader)
         }
         .sheet(item: $browsing) { target in
@@ -323,8 +343,9 @@ struct LibraryView: View {
         .accessibilityHidden(true)
     }
 
-    private func openSearch() {
+    private func openSearch(from song: Song? = nil) {
         playing = nil
+        searchOrigin = song
         query = ""
         isSearchPresented = true
         Task {
@@ -332,6 +353,18 @@ struct LibraryView: View {
             try? await Task.sleep(for: .seconds(0.6))
             isSearchFocused = true
         }
+    }
+
+    /// Annule un clic par erreur sur la recherche : le morceau rouvre au même endroit.
+    private func returnToSong() {
+        guard let song = searchOrigin.flatMap({ library.song(matching: $0.url) }) else { return }
+        searchOrigin = nil
+        query = ""
+        isSearchFocused = false
+        isSearchPresented = false
+        dismissKeyboard()
+        resumesPlayer = true
+        playing = song
     }
 
     private func select(_ item: Playlist?) {
