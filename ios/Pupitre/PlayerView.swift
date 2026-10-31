@@ -29,7 +29,8 @@ struct PlayerView: View {
                     Text("\(song.title) · \(song.artist)")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.vertical, 4)
+                        // Décalé pour rester hors de l'arrondi de l'écran.
+                        .padding(.leading, 34).padding(.trailing, 8).padding(.top, 14).padding(.bottom, 4)
                 } else {
                     header(topInset: proxy.safeAreaInsets.top)
                     Divider()
@@ -55,10 +56,10 @@ struct PlayerView: View {
                   if isWide {
                       // La bande de l'heure existe seulement si iOS la réserve à droite.
                       let strip = proxy.safeAreaInsets.trailing
-                      sideControls(width: strip > 40 ? strip : 92, top: strip > 40 ? 100 : 8)
+                      sideControls(width: max(strip, 0) + (strip > 40 ? 26 : 118), top: strip > 40 ? 106 : 8)
                   } else { controls }
               }
-              .padding(.bottom, max(8, proxy.safeAreaInsets.bottom * 0.4))
+              .padding(.bottom, isWide ? 14 : max(8, proxy.safeAreaInsets.bottom * 0.4))
               .background(isWide ? Palette.background : Palette.panel)
             }
             .ignoresSafeArea(edges: isWide ? [.top, .bottom, .trailing] : [.top, .bottom])
@@ -119,13 +120,10 @@ struct PlayerView: View {
 
     private var sideColumn: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 0) {
-                stepButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
-                stepButton("magnifyingglass", label: "Rechercher un morceau", height: 46, action: onSearch)
-            }
-            HStack(spacing: 0) {
-                stepButton("backward.end.fill", label: "Morceau précédent", height: 46) { go(-1) }
-                stepButton("forward.end.fill", label: "Morceau suivant", height: 46) { go(1) }
+            sideButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
+            HStack(spacing: 4) {
+                sideButton("backward.end.fill", label: "Morceau précédent", height: 46) { go(-1) }
+                sideButton("forward.end.fill", label: "Morceau suivant", height: 46) { go(1) }
             }
             playButton
             sideStepper(icon: "speedometer", label: "Vitesse", value: "\(Int(song.speed))",
@@ -137,33 +135,56 @@ struct PlayerView: View {
             sideStepper(icon: "textformat.size", label: "Texte", value: "\(Int((song.scale * 100).rounded()))%",
                         minus: { change { $0.scale = max(0.6, $0.scale - 0.1) } },
                         plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
+            Spacer(minLength: 0)
             Button { lyricsOnly.toggle() } label: {
                 Text(lyricsOnly ? "Accords" : "Paroles")
-                    .font(.footnote.bold())
+                    .font(.subheadline.bold())
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .frame(maxWidth: .infinity, minHeight: 46)
                     .background(Palette.section, in: .rect(cornerRadius: 12))
                     .foregroundStyle(.black)
                     .contentShape(.rect)
             }
             .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
+            Button(action: onSearch) {
+                Image(systemName: "magnifyingglass")
+                    .font(.title3.bold())
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(Palette.panel, in: .capsule)
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel("Rechercher un morceau")
+            .foregroundStyle(.primary)
         }
     }
 
     private func sideStepper(icon: String, label: String, value: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 3) {
-                Image(systemName: icon).font(.caption2).foregroundStyle(.secondary)
-                Text(value).font(.caption2.bold()).monospacedDigit().lineLimit(1).fixedSize()
+        VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.footnote).foregroundStyle(.secondary)
+                Text(value).font(.headline).monospacedDigit().lineLimit(1).fixedSize()
             }
-            .padding(.top, 4)
-            HStack(spacing: 0) {
-                stepButton("minus", label: "\(label) moins", height: 48, action: minus)
-                stepButton("plus", label: "\(label) plus", height: 48, action: plus)
+            HStack(spacing: 4) {
+                sideButton("minus", label: "\(label) moins", height: 46, action: minus)
+                sideButton("plus", label: "\(label) plus", height: 46, action: plus)
             }
         }
-        .background(Palette.background, in: .rect(cornerRadius: 12))
+    }
+
+    /// Bouton entouré de la barre de paysage : on voit où toucher sans regarder longtemps.
+    private func sideButton(_ icon: String, label: String, height: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.title3.bold())
+                .frame(maxWidth: .infinity, minHeight: height)
+                .background(Palette.panel, in: .rect(cornerRadius: 11))
+                .overlay(RoundedRectangle(cornerRadius: 11).stroke(.white.opacity(0.35), lineWidth: 1))
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(label)
+        .foregroundStyle(.primary)
     }
 
     private var playButton: some View {
