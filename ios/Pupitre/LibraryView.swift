@@ -62,17 +62,23 @@ struct LibraryView: View {
                             .font(.subheadline).foregroundStyle(.secondary)
                             .listRowBackground(Color.clear)
                         ForEach(letterGroups, id: \.letter) { group in
+                            // Une vraie ligne, pas un titre de section : un saut la place sous la barre du haut.
+                            Section {
+                                Text(group.letter)
+                                    .font(.title2.bold())
+                                    .foregroundStyle(Palette.chord)
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .id("lettre-" + group.letter)
+                            }
+                            .listSectionSpacing(0)
                             Section {
                                 ForEach(group.songs) { row($0) }
                                     .onDelete { offsets in
                                         offsets.map { group.songs[$0] }.forEach(library.remove)
                                     }
-                            } header: {
-                                Text(group.letter)
-                                    .font(.title2.bold())
-                                    .foregroundStyle(Palette.chord)
-                                    .id("lettre-" + group.letter)
                             }
+                            .listSectionSpacing(14)
                         }
                     } else {
                         Section(countLabel) {
@@ -300,6 +306,11 @@ struct LibraryView: View {
                 if let song = scope.first(where: { $0.initial == letter }) {
                     if isAlphabetical {
                         proxy.scrollTo("lettre-" + letter, anchor: .top)
+                        // Après un grand saut, la position n'est juste qu'une fois les lignes mesurées.
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(80))
+                            proxy.scrollTo("lettre-" + letter, anchor: .top)
+                        }
                     } else {
                         proxy.scrollTo(song.id, anchor: .top)
                     }

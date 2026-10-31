@@ -57,6 +57,8 @@ struct PlayerView: View {
                       // La bande de l'heure existe seulement si iOS la réserve à droite.
                       let strip = proxy.safeAreaInsets.trailing
                       sideControls(width: max(strip, 0) + (strip > 40 ? 26 : 118), top: strip > 40 ? 130 : 8)
+                  } else if proxy.size.width >= 600 {
+                      oneLineControls
                   } else { controls }
               }
               .padding(.bottom, isWide ? 14 : max(8, proxy.safeAreaInsets.bottom * 0.4))
@@ -118,6 +120,38 @@ struct PlayerView: View {
         .frame(maxHeight: .infinity)
     }
 
+    // Portrait ouvert : tout sur une ligne, le texte gagne la hauteur d'une rangée de boutons.
+    private var oneLineControls: some View {
+        HStack(spacing: 6) {
+            playButton.frame(minWidth: 84)
+            compactSpeed
+            compactKey
+            compactSize
+            lyricsButton(width: 78)
+            searchButton(width: 52)
+        }
+        .padding(.horizontal, 8).padding(.top, 8)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var compactSpeed: some View {
+        sideStepper(icon: "speedometer", label: "Vitesse", value: "\(Int(song.speed))",
+                    minus: { change { $0.speed = max(5, $0.speed - 5) } },
+                    plus: { change { $0.speed = min(150, $0.speed + 5) } })
+    }
+
+    private var compactKey: some View {
+        sideStepper(icon: "music.note", label: "Ton", value: song.transpose > 0 ? "+\(song.transpose)" : "\(song.transpose)",
+                    minus: { change { $0.transpose -= 1 } },
+                    plus: { change { $0.transpose += 1 } })
+    }
+
+    private var compactSize: some View {
+        sideStepper(icon: "textformat.size", label: "Texte", value: "\(Int((song.scale * 100).rounded()))%",
+                    minus: { change { $0.scale = max(0.6, $0.scale - 0.1) } },
+                    plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
+    }
+
     private var sideColumn: some View {
         VStack(spacing: 6) {
             // Calé en bas : le vide reste sous l'heure, où iOS peut afficher ses propres éléments.
@@ -128,15 +162,9 @@ struct PlayerView: View {
                 sideButton("forward.end.fill", label: "Morceau suivant", height: 46) { go(1) }
             }
             playButton
-            sideStepper(icon: "speedometer", label: "Vitesse", value: "\(Int(song.speed))",
-                        minus: { change { $0.speed = max(5, $0.speed - 5) } },
-                        plus: { change { $0.speed = min(150, $0.speed + 5) } })
-            sideStepper(icon: "music.note", label: "Ton", value: song.transpose > 0 ? "+\(song.transpose)" : "\(song.transpose)",
-                        minus: { change { $0.transpose -= 1 } },
-                        plus: { change { $0.transpose += 1 } })
-            sideStepper(icon: "textformat.size", label: "Texte", value: "\(Int((song.scale * 100).rounded()))%",
-                        minus: { change { $0.scale = max(0.6, $0.scale - 0.1) } },
-                        plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
+            compactSpeed
+            compactKey
+            compactSize
             Button { lyricsOnly.toggle() } label: {
                 Text(lyricsOnly ? "Accords" : "Paroles")
                     .font(.subheadline.bold())
