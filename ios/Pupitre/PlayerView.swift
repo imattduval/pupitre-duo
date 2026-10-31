@@ -47,7 +47,7 @@ struct PlayerView: View {
                         } else if let message {
                             Text(message)
                                 .padding(16)
-                                .background(.black.opacity(0.9), in: .rect(cornerRadius: 14))
+                                .background(.black.opacity(0.9), in: .rect(cornerRadius: 22))
                         }
                     }
               }
@@ -56,12 +56,12 @@ struct PlayerView: View {
                   if isWide {
                       // La bande de l'heure existe seulement si iOS la réserve à droite.
                       let strip = proxy.safeAreaInsets.trailing
-                      sideControls(width: max(strip, 0) + (strip > 40 ? 26 : 118), top: strip > 40 ? 130 : 8)
+                      sideControls(width: max(strip, 0) + (strip > 40 ? 34 : 126), top: strip > 40 ? 130 : 8)
                   } else if proxy.size.width >= 600 {
                       oneLineControls
                   } else { controls }
               }
-              .padding(.bottom, isWide ? 14 : max(8, proxy.safeAreaInsets.bottom * 0.4))
+              .padding(.bottom, isWide ? 16 : max(12, proxy.safeAreaInsets.bottom * 0.4))
               .background(isWide ? Palette.background : Palette.panel)
             }
             .ignoresSafeArea(edges: isWide ? [.top, .bottom, .trailing] : [.top, .bottom])
@@ -115,7 +115,7 @@ struct PlayerView: View {
             sideColumn
             ScrollView(showsIndicators: false) { sideColumn }
         }
-        .padding(.horizontal, 4).padding(.top, top)
+        .padding(.leading, 4).padding(.trailing, 12).padding(.top, top)
         .frame(width: width)
         .frame(maxHeight: .infinity)
     }
@@ -130,7 +130,7 @@ struct PlayerView: View {
             lyricsButton(width: 78)
             searchButton(width: 52)
         }
-        .padding(.horizontal, 8).padding(.top, 8)
+        .padding(.horizontal, 12).padding(.top, 8)
         .frame(maxWidth: .infinity)
     }
 
@@ -171,7 +171,7 @@ struct PlayerView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(Palette.section, in: .rect(cornerRadius: 12))
+                    .background(Palette.section, in: .rect(cornerRadius: 20))
                     .foregroundStyle(.black)
                     .contentShape(.rect)
             }
@@ -208,8 +208,8 @@ struct PlayerView: View {
             Image(systemName: icon)
                 .font(.title3.bold())
                 .frame(maxWidth: .infinity, minHeight: height)
-                .background(Palette.panel, in: .rect(cornerRadius: 11))
-                .overlay(RoundedRectangle(cornerRadius: 11).stroke(.white.opacity(0.35), lineWidth: 1))
+                .background(Palette.panel, in: .rect(cornerRadius: 17))
+                .overlay(RoundedRectangle(cornerRadius: 17).stroke(.white.opacity(0.35), lineWidth: 1))
                 .contentShape(.rect)
         }
         .accessibilityLabel(label)
@@ -221,7 +221,7 @@ struct PlayerView: View {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.title.bold())
                 .frame(maxWidth: .infinity, minHeight: 68)
-                .background(Palette.chord, in: .rect(cornerRadius: 14))
+                .background(Palette.chord, in: .rect(cornerRadius: 22))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
         }
@@ -233,7 +233,7 @@ struct PlayerView: View {
             Image(systemName: "magnifyingglass")
                 .font(.title2.bold())
                 .frame(width: width, height: 68)
-                .background(Palette.background, in: .rect(cornerRadius: 14))
+                .background(Palette.background, in: .rect(cornerRadius: 22))
                 .contentShape(.rect)
         }
         .accessibilityLabel("Rechercher un morceau")
@@ -265,7 +265,7 @@ struct PlayerView: View {
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: width, height: 68)
-                .background(Palette.section, in: .rect(cornerRadius: 14))
+                .background(Palette.section, in: .rect(cornerRadius: 22))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
         }
@@ -283,7 +283,7 @@ struct PlayerView: View {
             stepButton("plus", label: "\(label) plus", action: plus)
         }
         .frame(maxWidth: .infinity)
-        .background(Palette.background, in: .rect(cornerRadius: 14))
+        .background(Palette.background, in: .rect(cornerRadius: 22))
     }
 
     private func stepButton(_ icon: String, label: String, height: CGFloat = 68, action: @escaping () -> Void) -> some View {
