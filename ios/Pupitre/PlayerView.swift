@@ -25,7 +25,12 @@ struct PlayerView: View {
             let layout = isWide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
             layout {
               VStack(spacing: 0) {
-                if !isWide {
+                if isWide {
+                    Text("\(song.title) · \(song.artist)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.vertical, 4)
+                } else {
                     header(topInset: proxy.safeAreaInsets.top)
                     Divider()
                 }
@@ -47,12 +52,16 @@ struct PlayerView: View {
               }
               Divider()
               Group {
-                  if isWide { sideControls } else { controls }
+                  if isWide {
+                      // La bande de l'heure existe seulement si iOS la réserve à droite.
+                      let strip = proxy.safeAreaInsets.trailing
+                      sideControls(width: strip > 40 ? strip : 92, top: strip > 40 ? 100 : 8)
+                  } else { controls }
               }
               .padding(.bottom, max(8, proxy.safeAreaInsets.bottom * 0.4))
-              .background(Palette.panel)
+              .background(isWide ? Palette.background : Palette.panel)
             }
-            .ignoresSafeArea(edges: isWide ? [.bottom] : [.top, .bottom])
+            .ignoresSafeArea(edges: isWide ? [.top, .bottom, .trailing] : [.top, .bottom])
         }
         .background(Palette.background)
         .onChange(of: isPlaying) { _, playing in
@@ -97,47 +106,76 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // Paysage : tout tient dans une colonne étroite à droite, le texte garde le reste de l'écran.
-    private var sideControls: some View {
+    // Paysage : tout tient dans la bande de droite, sous l'heure ; le texte garde le reste de l'écran.
+    private func sideControls(width: CGFloat, top: CGFloat) -> some View {
         ViewThatFits(in: .vertical) {
             sideColumn
             ScrollView(showsIndicators: false) { sideColumn }
         }
-        .padding(.horizontal, 8).padding(.top, 6)
-        .frame(width: 166)
+        .padding(.horizontal, 4).padding(.top, top)
+        .frame(width: width)
         .frame(maxHeight: .infinity)
     }
 
     private var sideColumn: some View {
         VStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(song.title).font(.footnote.bold()).lineLimit(2)
-                Text(song.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 0) {
-                iconButton("chevron.left", label: "Retour à la liste") { dismiss() }
-                iconButton("backward.end.fill", label: "Morceau précédent") { go(-1) }
-                iconButton("forward.end.fill", label: "Morceau suivant") { go(1) }
+                stepButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
+                stepButton("magnifyingglass", label: "Rechercher un morceau", height: 46, action: onSearch)
+            }
+            HStack(spacing: 0) {
+                stepButton("backward.end.fill", label: "Morceau précédent", height: 46) { go(-1) }
+                stepButton("forward.end.fill", label: "Morceau suivant", height: 46) { go(1) }
             }
             playButton
-            speed
-            key
-            textSize
-            Spacer(minLength: 0)
-            HStack(spacing: 8) { searchButton(width: 56); lyricsButton(width: 86) }
+            sideStepper(icon: "speedometer", label: "Vitesse", value: "\(Int(song.speed))",
+                        minus: { change { $0.speed = max(5, $0.speed - 5) } },
+                        plus: { change { $0.speed = min(150, $0.speed + 5) } })
+            sideStepper(icon: "music.note", label: "Ton", value: song.transpose > 0 ? "+\(song.transpose)" : "\(song.transpose)",
+                        minus: { change { $0.transpose -= 1 } },
+                        plus: { change { $0.transpose += 1 } })
+            sideStepper(icon: "textformat.size", label: "Texte", value: "\(Int((song.scale * 100).rounded()))%",
+                        minus: { change { $0.scale = max(0.6, $0.scale - 0.1) } },
+                        plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
+            Button { lyricsOnly.toggle() } label: {
+                Text(lyricsOnly ? "Accords" : "Paroles")
+                    .font(.footnote.bold())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(Palette.section, in: .rect(cornerRadius: 12))
+                    .foregroundStyle(.black)
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
         }
+    }
+
+    private func sideStepper(icon: String, label: String, value: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 3) {
+                Image(systemName: icon).font(.caption2).foregroundStyle(.secondary)
+                Text(value).font(.caption2.bold()).monospacedDigit().lineLimit(1).fixedSize()
+            }
+            .padding(.top, 4)
+            HStack(spacing: 0) {
+                stepButton("minus", label: "\(label) moins", height: 48, action: minus)
+                stepButton("plus", label: "\(label) plus", height: 48, action: plus)
+            }
+        }
+        .background(Palette.background, in: .rect(cornerRadius: 12))
     }
 
     private var playButton: some View {
         Button { isPlaying.toggle() } label: {
-            Text(isPlaying ? "Pause" : "Défiler")
-                .font(.title2.bold())
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.title.bold())
                 .frame(maxWidth: .infinity, minHeight: 68)
                 .background(Palette.chord, in: .rect(cornerRadius: 14))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
         }
+        .accessibilityLabel(isPlaying ? "Pause" : "Lecture")
     }
 
     private func searchButton(width: CGFloat = 76) -> some View {
@@ -198,11 +236,11 @@ struct PlayerView: View {
         .background(Palette.background, in: .rect(cornerRadius: 14))
     }
 
-    private func stepButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func stepButton(_ icon: String, label: String, height: CGFloat = 68, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.title2.bold())
-                .frame(maxWidth: .infinity, minHeight: 68)
+                .frame(maxWidth: .infinity, minHeight: height)
                 .contentShape(.rect)
         }
         .accessibilityLabel(label)
