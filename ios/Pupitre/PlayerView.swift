@@ -49,6 +49,8 @@ struct PlayerView: View {
                           startOffset: resume ? SheetView.lastOffset : nil,
                           topInset: 0,
                           sideInset: isClosed && isWide ? 8 : 16,
+                          // Paysage fermé : même taille de lettres avec ou sans la colonne de commandes.
+                          fontWidth: isClosed && isWide ? proxy.size.width + insets.leading + insets.trailing - 138 : nil,
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() },
                           onTap: textTapped)
@@ -65,9 +67,8 @@ struct PlayerView: View {
                         }
                     }
               }
-              // Vertical : la barre se replie et le texte gagne sa hauteur. Paysage : elle s'efface
-              // sans libérer sa place, car élargir le texte le ferait sauter en pleine lecture.
-              if !(controlsHidden && !isWide) {
+              // Les commandes se replient : le texte gagne leur hauteur en vertical, leur largeur en paysage.
+              if !controlsHidden {
               Divider()
               Group {
                   if isWide {
@@ -82,8 +83,6 @@ struct PlayerView: View {
               }
               .padding(.bottom, isWide ? 16 : max(12, insets.bottom * 0.4))
               .background(isWide ? Palette.background : Palette.panel)
-              .opacity(controlsHidden ? 0 : 1)
-              .allowsHitTesting(!controlsHidden)
               }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -462,6 +461,7 @@ struct SheetView: UIViewRepresentable {
     let startOffset: CGFloat?
     let topInset: CGFloat
     let sideInset: CGFloat
+    let fontWidth: CGFloat?
     let onScale: (Double) -> Void
     let onBack: () -> Void
     let onTap: () -> Void
@@ -494,7 +494,8 @@ struct SheetView: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.isPlayingBinding = $isPlaying
         coordinator.speed = song.speed
-        if coordinator.topInset != topInset || coordinator.sideInset != sideInset {
+        if coordinator.topInset != topInset || coordinator.sideInset != sideInset || coordinator.fontWidth != fontWidth {
+            coordinator.fontWidth = fontWidth
             coordinator.topInset = topInset
             coordinator.sideInset = sideInset
             coordinator.layout()
@@ -532,6 +533,7 @@ struct SheetView: UIViewRepresentable {
         var pendingOffset: CGFloat?
         var topInset: CGFloat = 0
         var sideInset: CGFloat = 16
+        var fontWidth: CGFloat?
 
         @objc func tapped() { onTap() }
 
@@ -590,7 +592,7 @@ struct SheetView: UIViewRepresentable {
             let unit = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)]).width / 100
             // Taille liée à la largeur de l'écran, pas à la ligne la plus longue : une longue ligne
             // passe à la ligne au lieu de rapetisser tout le morceau.
-            let size = max(14, available / 35) * scale
+            let size = max(14, (fontWidth ?? available) / 35) * scale
             let visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = size * 0.18
