@@ -25,8 +25,10 @@ struct PlayerView: View {
             let layout = isWide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
             layout {
               VStack(spacing: 0) {
-                header(topInset: isWide ? 0 : proxy.safeAreaInsets.top)
-                Divider()
+                if !isWide {
+                    header(topInset: proxy.safeAreaInsets.top)
+                    Divider()
+                }
                 SheetView(song: song, lyricsOnly: lyricsOnly, isPlaying: $isPlaying,
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() })
@@ -88,25 +90,43 @@ struct PlayerView: View {
     // et de couleurs différentes pour ne pas les confondre.
     private var controls: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 8) { playButton; speed; searchButton }
-            HStack(spacing: 8) { key; textSize; lyricsButton }
+            HStack(spacing: 8) { playButton; speed; searchButton() }
+            HStack(spacing: 8) { key; textSize; lyricsButton() }
         }
         .padding(.horizontal, 8).padding(.top, 8)
         .frame(maxWidth: .infinity)
     }
 
+    // Paysage : tout tient dans une colonne étroite à droite, le texte garde le reste de l'écran.
     private var sideControls: some View {
-        VStack(spacing: 8) {
+        ViewThatFits(in: .vertical) {
+            sideColumn
+            ScrollView(showsIndicators: false) { sideColumn }
+        }
+        .padding(.horizontal, 8).padding(.top, 6)
+        .frame(width: 166)
+        .frame(maxHeight: .infinity)
+    }
+
+    private var sideColumn: some View {
+        VStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(song.title).font(.footnote.bold()).lineLimit(2)
+                Text(song.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 0) {
+                iconButton("chevron.left", label: "Retour à la liste") { dismiss() }
+                iconButton("backward.end.fill", label: "Morceau précédent") { go(-1) }
+                iconButton("forward.end.fill", label: "Morceau suivant") { go(1) }
+            }
             playButton
             speed
             key
             textSize
             Spacer(minLength: 0)
-            HStack(spacing: 8) { searchButton; lyricsButton }
+            HStack(spacing: 8) { searchButton(width: 56); lyricsButton(width: 86) }
         }
-        .padding(.horizontal, 8).padding(.top, 8)
-        .frame(width: 270)
-        .frame(maxHeight: .infinity)
     }
 
     private var playButton: some View {
@@ -120,11 +140,11 @@ struct PlayerView: View {
         }
     }
 
-    private var searchButton: some View {
+    private func searchButton(width: CGFloat = 76) -> some View {
         Button(action: onSearch) {
             Image(systemName: "magnifyingglass")
                 .font(.title2.bold())
-                .frame(width: 76, height: 68)
+                .frame(width: width, height: 68)
                 .background(Palette.background, in: .rect(cornerRadius: 14))
                 .contentShape(.rect)
         }
@@ -150,13 +170,13 @@ struct PlayerView: View {
                 plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
     }
 
-    private var lyricsButton: some View {
+    private func lyricsButton(width: CGFloat = 96) -> some View {
         Button { lyricsOnly.toggle() } label: {
             Text(lyricsOnly ? "Accords" : "Paroles")
                 .font(.headline.bold())
                 .lineLimit(1)
                 .fixedSize()
-                .frame(width: 96, height: 68)
+                .frame(width: width, height: 68)
                 .background(Palette.section, in: .rect(cornerRadius: 14))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
