@@ -156,7 +156,7 @@ struct LibraryView: View {
                             .font(.headline)
                             .padding(.horizontal, 20)
                             .frame(minHeight: 52)
-                            .background(Palette.chord, in: .capsule)
+                            .background(Palette.button, in: .capsule)
                             .foregroundStyle(.black)
                             .contentShape(.capsule)
                     }
@@ -272,7 +272,7 @@ struct LibraryView: View {
                     }
                     .padding(.horizontal, 14)
                     .frame(maxWidth: .infinity, minHeight: 60)
-                    .background(Palette.chord, in: .rect(cornerRadius: 14))
+                    .background(Palette.button, in: .rect(cornerRadius: 14))
                     .foregroundStyle(.black)
                     .contentShape(.rect)
                 }
@@ -300,7 +300,7 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 14)
             .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-            .background(isSelected ? Palette.chord : Palette.panel, in: .rect(cornerRadius: 14))
+            .background(isSelected ? Palette.button : Palette.panel, in: .rect(cornerRadius: 14))
             .foregroundStyle(isSelected ? Color.black : Color.white)
             .contentShape(.rect)
         }

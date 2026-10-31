@@ -18,7 +18,7 @@ struct PlayerView: View {
     @State private var message: String?
     @State private var isPlaying = false
     @State private var lyricsOnly = false
-    @State private var isPortrait = true
+    @State private var hidesStatusBar = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -79,9 +79,9 @@ struct PlayerView: View {
             .ignoresSafeArea(edges: isWide ? [.top, .bottom, .leading, .trailing] : isClosedPortrait ? [.top, .bottom, .trailing] : [.top, .bottom])
         }
         .background(Palette.background)
-        // En vertical, l'heure et le réseau laissent la place au morceau.
-        .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isPortrait = $0 }
-        .statusBarHidden(isPortrait)
+        // Écran fermé en vertical : l'heure et le réseau laissent la place au morceau. Ouvert, on les garde.
+        .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width && $0.size.width < 560 } action: { hidesStatusBar = $0 }
+        .statusBarHidden(hidesStatusBar)
         .task {
             // iOS peut rendre le clavier à la recherche pendant la transition vers le lecteur.
             dismissKeyboard()
@@ -165,7 +165,7 @@ struct PlayerView: View {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.title3.bold())
                 .frame(maxWidth: .infinity, minHeight: 46)
-                .background(Palette.chord, in: .rect(cornerRadius: 17))
+                .background(Palette.button, in: .rect(cornerRadius: 17))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
         }
@@ -281,7 +281,7 @@ struct PlayerView: View {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.title.bold())
                 .frame(maxWidth: .infinity, minHeight: 68)
-                .background(Palette.chord, in: .rect(cornerRadius: 22))
+                .background(Palette.button, in: .rect(cornerRadius: 22))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
         }
