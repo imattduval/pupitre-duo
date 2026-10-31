@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct PupitreApp: App {
     @State private var library = Library()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -10,6 +11,11 @@ struct PupitreApp: App {
                 .environment(library)
                 .preferredColorScheme(.dark)
                 .tint(Palette.chord)
+                // Au piano, l'écran ne doit jamais s'éteindre tant que l'app est ouverte.
+                .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+                .onChange(of: scenePhase) { _, phase in
+                    UIApplication.shared.isIdleTimerDisabled = phase == .active
+                }
         }
     }
 }

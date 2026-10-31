@@ -23,6 +23,11 @@ struct PlayerView: View {
         GeometryReader { proxy in
             // Duo ouvert en paysage : le texte à gauche, les commandes en colonne à droite.
             let isWide = proxy.size.width > proxy.size.height
+            let insets = proxy.safeAreaInsets
+            // Écran fermé : 466 points sur son petit côté, contre plus de 620 une fois ouvert.
+            let isClosed = min(proxy.size.width + insets.leading + insets.trailing,
+                               proxy.size.height + insets.top + insets.bottom) < 560
+            let isClosedPortrait = isClosed && !isWide
             let layout = isWide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
             layout {
               VStack(spacing: 0) {
@@ -31,16 +36,25 @@ struct PlayerView: View {
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         // Décalé pour rester hors de l'arrondi de l'écran.
-                        .padding(.leading, 34).padding(.trailing, 8).padding(.top, 14).padding(.bottom, 4)
+                        .padding(.leading, isClosed ? 14 : 34).padding(.trailing, 8).padding(.top, 14).padding(.bottom, 4)
                 } else {
-                    header(topInset: proxy.safeAreaInsets.top)
-                    Divider()
+                    header(topInset: insets.top, isClosed: isClosed, trailing: insets.trailing)
+                    Divider().padding(.trailing, isClosedPortrait ? insets.trailing : 0)
                 }
                 SheetView(song: song, lyricsOnly: lyricsOnly, isPlaying: $isPlaying,
                           startOffset: resume ? SheetView.lastOffset : nil,
+                          topInset: isClosedPortrait ? Self.statusClearance : 0,
+                          sideInset: isClosed && isWide ? 8 : 16,
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() })
                     .id(song.url)
+                    .overlay(alignment: .topTrailing) {
+                        // Le texte défile sur toute la largeur et passe sous l'heure sans s'y mêler.
+                        if isClosedPortrait {
+                            Palette.background.frame(width: insets.trailing, height: Self.statusClearance)
+                                .allowsHitTesting(false)
+                        }
+                    }
                     .overlay {
                         if isLoading {
                             ProgressView().controlSize(.large)
@@ -57,23 +71,20 @@ struct PlayerView: View {
               Group {
                   if isWide {
                       // La bande de l'heure existe seulement si iOS la réserve à droite.
-                      let strip = proxy.safeAreaInsets.trailing
-                      sideControls(width: max(strip, 0) + (strip > 40 ? 34 : 126), top: strip > 40 ? 130 : 8)
+                      let strip = insets.trailing
+                      sideControls(width: isClosed ? 122 : max(strip, 0) + (strip > 40 ? 34 : 126), top: isClosed ? 10 : strip > 40 ? 130 : 8, isClosed: isClosed)
+                  } else if isClosed {
+                      closedControls
                   } else if proxy.size.width >= 600 {
                       oneLineControls
                   } else { controls }
               }
-              .padding(.bottom, isWide ? 16 : max(12, proxy.safeAreaInsets.bottom * 0.4))
+              .padding(.bottom, isWide ? 16 : max(12, insets.bottom * 0.4))
               .background(isWide ? Palette.background : Palette.panel)
             }
-            .ignoresSafeArea(edges: isWide ? [.top, .bottom, .trailing] : [.top, .bottom])
+            .ignoresSafeArea(edges: isWide ? [.top, .bottom, .leading, .trailing] : isClosedPortrait ? [.top, .bottom, .trailing] : [.top, .bottom])
         }
         .background(Palette.background)
-        .onChange(of: isPlaying) { _, playing in
-            // L'écran reste allumé pendant le défilement.
-            UIApplication.shared.isIdleTimerDisabled = playing
-        }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .task {
             // iOS peut rendre le clavier à la recherche pendant la transition vers le lecteur.
             dismissKeyboard()
@@ -83,7 +94,7 @@ struct PlayerView: View {
     }
 
     /// Duo ouvert : l'heure occupe le haut à droite, le titre se place dans la même bande, à sa gauche.
-    private func header(topInset: CGFloat) -> some View {
+    private func header(topInset: CGFloat, isClosed: Bool, trailing: CGFloat) -> some View {
         HStack(spacing: 4) {
             iconButton("chevron.left", label: "Retour à la liste") { dismiss() }
             VStack(alignment: .leading, spacing: 0) {
@@ -91,11 +102,13 @@ struct PlayerView: View {
                 Text(song.artist).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            iconButton("backward.end.fill", label: "Morceau précédent") { go(-1) }
-            iconButton("forward.end.fill", label: "Morceau suivant") { go(1) }
+            if !isClosed {
+                iconButton("backward.end.fill", label: "Morceau précédent") { go(-1) }
+                iconButton("forward.end.fill", label: "Morceau suivant") { go(1) }
+            }
         }
         .padding(.leading, 6)
-        .padding(.trailing, topInset > 30 ? 180 : 6)
+        .padding(.trailing, isClosed ? trailing + 6 : topInset > 30 ? 180 : 6)
         .padding(.top, 6)
         .frame(minHeight: max(56, topInset))
     }
@@ -112,14 +125,57 @@ struct PlayerView: View {
     }
 
     // Paysage : tout tient dans la bande de droite, sous l'heure ; le texte garde le reste de l'écran.
-    private func sideControls(width: CGFloat, top: CGFloat) -> some View {
+    private func sideControls(width: CGFloat, top: CGFloat, isClosed: Bool) -> some View {
         ViewThatFits(in: .vertical) {
-            sideColumn
-            ScrollView(showsIndicators: false) { sideColumn }
+            if isClosed { closedSideColumn } else { sideColumn }
+            ScrollView(showsIndicators: false) { if isClosed { closedSideColumn } else { sideColumn } }
         }
         .padding(.leading, 4).padding(.trailing, 12).padding(.top, top)
         .frame(width: width)
         .frame(maxHeight: .infinity)
+    }
+
+    /// Haut de l'écran fermé en vertical : hauteur du bloc caméra, heure et réseau sous la barre de titre.
+    private static let statusClearance: CGFloat = 98
+
+    // Écran fermé : pincer règle la taille et toucher le texte lance le défilement, donc commandes réduites.
+    private var closedControls: some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            compactPlay.frame(width: 58)
+            compactSpeed
+            compactKey
+            compactLyrics.frame(width: 72)
+            compactSearch.frame(width: 48)
+        }
+        .padding(.horizontal, 12).padding(.top, 8)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var closedSideColumn: some View {
+        // Calé en haut : selon le sens du paysage, la caméra arrive en bas à droite.
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                sideButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
+                compactSearch
+            }
+            compactPlay
+            compactSpeed
+            compactKey
+            compactLyrics
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var compactPlay: some View {
+        Button { isPlaying.toggle() } label: {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.title3.bold())
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(Palette.chord, in: .rect(cornerRadius: 17))
+                .foregroundStyle(.black)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(isPlaying ? "Pause" : "Lecture")
     }
 
     // Portrait ouvert : tout sur une ligne, le texte gagne la hauteur d'une rangée de boutons.
@@ -167,28 +223,36 @@ struct PlayerView: View {
             compactSpeed
             compactKey
             compactSize
-            Button { lyricsOnly.toggle() } label: {
-                Text(lyricsOnly ? "Accords" : "Paroles")
-                    .font(.subheadline.bold())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(Palette.section, in: .rect(cornerRadius: 20))
-                    .foregroundStyle(.black)
-                    .contentShape(.rect)
-            }
-            .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
-            Button { onSearch(song) } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.title3.bold())
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(Palette.panel, in: .capsule)
-                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
-                    .contentShape(.rect)
-            }
-            .accessibilityLabel("Rechercher un morceau")
-            .foregroundStyle(.primary)
+            compactLyrics
+            compactSearch
         }
+    }
+
+    private var compactLyrics: some View {
+        Button { lyricsOnly.toggle() } label: {
+            Text(lyricsOnly ? "Accords" : "Paroles")
+                .font(.subheadline.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(Palette.section, in: .rect(cornerRadius: 20))
+                .foregroundStyle(.black)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
+    }
+
+    private var compactSearch: some View {
+        Button { onSearch(song) } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.title3.bold())
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(Palette.panel, in: .capsule)
+                .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
+                .contentShape(.rect)
+        }
+        .accessibilityLabel("Rechercher un morceau")
+        .foregroundStyle(.primary)
     }
 
     private func sideStepper(icon: String, label: String, value: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
@@ -351,6 +415,8 @@ struct SheetView: UIViewRepresentable {
     let lyricsOnly: Bool
     @Binding var isPlaying: Bool
     let startOffset: CGFloat?
+    let topInset: CGFloat
+    let sideInset: CGFloat
     let onScale: (Double) -> Void
     let onBack: () -> Void
 
@@ -382,6 +448,11 @@ struct SheetView: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.isPlayingBinding = $isPlaying
         coordinator.speed = song.speed
+        if coordinator.topInset != topInset || coordinator.sideInset != sideInset {
+            coordinator.topInset = topInset
+            coordinator.sideInset = sideInset
+            coordinator.layout()
+        }
         coordinator.onScale = onScale
         coordinator.onBack = onBack
         coordinator.render(song: song, lyricsOnly: lyricsOnly)
@@ -411,6 +482,8 @@ struct SheetView: UIViewRepresentable {
         private var pinchStart: Double = 1
         private var pointsPerSecond: Double = 20
         var pendingOffset: CGFloat?
+        var topInset: CGFloat = 0
+        var sideInset: CGFloat = 16
 
         @objc func tapped() { isPlayingBinding.wrappedValue.toggle() }
 
@@ -464,7 +537,7 @@ struct SheetView: UIViewRepresentable {
 
         func layout() {
             guard let scroll, scroll.bounds.width > 0 else { return }
-            let inset: CGFloat = 16
+            let inset = sideInset
             let available = scroll.bounds.width - inset * 2
             let unit = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)]).width / 100
             // Taille liée à la largeur de l'écran, pas à la ligne la plus longue : une longue ligne
@@ -486,11 +559,11 @@ struct SheetView: UIViewRepresentable {
             let position = scroll.contentSize.height > 0 ? scroll.contentOffset.y / scroll.contentSize.height : 0
             label.attributedText = output
             let needed = label.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
-            label.frame = CGRect(x: inset, y: inset, width: available, height: needed.height)
+            label.frame = CGRect(x: inset, y: inset + topInset, width: available, height: needed.height)
             // Une vitesse de 30 parcourt tout le texte en 3 min 30, quels que soient sa taille et le mode.
             pointsPerSecond = Double(needed.height) / 210
             scroll.contentSize = CGSize(width: scroll.bounds.width,
-                                        height: needed.height + inset + scroll.bounds.height * 0.55)
+                                        height: needed.height + inset + topInset + scroll.bounds.height * 0.55)
             scroll.contentOffset.y = position * scroll.contentSize.height
             if let pendingOffset, !lines.isEmpty {
                 scroll.contentOffset.y = pendingOffset
