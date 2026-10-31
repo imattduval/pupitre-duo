@@ -56,7 +56,7 @@ struct PlayerView: View {
                   if isWide {
                       // La bande de l'heure existe seulement si iOS la réserve à droite.
                       let strip = proxy.safeAreaInsets.trailing
-                      sideControls(width: max(strip, 0) + (strip > 40 ? 26 : 118), top: strip > 40 ? 106 : 8)
+                      sideControls(width: max(strip, 0) + (strip > 40 ? 26 : 118), top: strip > 40 ? 130 : 8)
                   } else { controls }
               }
               .padding(.bottom, isWide ? 14 : max(8, proxy.safeAreaInsets.bottom * 0.4))
@@ -120,6 +120,8 @@ struct PlayerView: View {
 
     private var sideColumn: some View {
         VStack(spacing: 6) {
+            // Calé en bas : le vide reste sous l'heure, où iOS peut afficher ses propres éléments.
+            Spacer(minLength: 0)
             sideButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
             HStack(spacing: 4) {
                 sideButton("backward.end.fill", label: "Morceau précédent", height: 46) { go(-1) }
@@ -135,7 +137,6 @@ struct PlayerView: View {
             sideStepper(icon: "textformat.size", label: "Texte", value: "\(Int((song.scale * 100).rounded()))%",
                         minus: { change { $0.scale = max(0.6, $0.scale - 0.1) } },
                         plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
-            Spacer(minLength: 0)
             Button { lyricsOnly.toggle() } label: {
                 Text(lyricsOnly ? "Accords" : "Paroles")
                     .font(.subheadline.bold())
