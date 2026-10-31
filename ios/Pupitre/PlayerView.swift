@@ -18,6 +18,7 @@ struct PlayerView: View {
     @State private var message: String?
     @State private var isPlaying = false
     @State private var lyricsOnly = false
+    @State private var isPortrait = true
 
     var body: some View {
         GeometryReader { proxy in
@@ -43,18 +44,11 @@ struct PlayerView: View {
                 }
                 SheetView(song: song, lyricsOnly: lyricsOnly, isPlaying: $isPlaying,
                           startOffset: resume ? SheetView.lastOffset : nil,
-                          topInset: isClosedPortrait ? Self.statusClearance : 0,
+                          topInset: 0,
                           sideInset: isClosed && isWide ? 8 : 16,
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() })
                     .id(song.url)
-                    .overlay(alignment: .topTrailing) {
-                        // Le texte défile sur toute la largeur et passe sous l'heure sans s'y mêler.
-                        if isClosedPortrait {
-                            Palette.background.frame(width: insets.trailing, height: Self.statusClearance)
-                                .allowsHitTesting(false)
-                        }
-                    }
                     .overlay {
                         if isLoading {
                             ProgressView().controlSize(.large)
@@ -85,6 +79,9 @@ struct PlayerView: View {
             .ignoresSafeArea(edges: isWide ? [.top, .bottom, .leading, .trailing] : isClosedPortrait ? [.top, .bottom, .trailing] : [.top, .bottom])
         }
         .background(Palette.background)
+        // En vertical, l'heure et le réseau laissent la place au morceau.
+        .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isPortrait = $0 }
+        .statusBarHidden(isPortrait)
         .task {
             // iOS peut rendre le clavier à la recherche pendant la transition vers le lecteur.
             dismissKeyboard()
@@ -134,9 +131,6 @@ struct PlayerView: View {
         .frame(width: width)
         .frame(maxHeight: .infinity)
     }
-
-    /// Haut de l'écran fermé en vertical : hauteur du bloc caméra, heure et réseau sous la barre de titre.
-    private static let statusClearance: CGFloat = 98
 
     // Écran fermé : pincer règle la taille et toucher le texte lance le défilement, donc commandes réduites.
     private var closedControls: some View {
