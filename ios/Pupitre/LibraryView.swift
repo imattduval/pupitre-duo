@@ -14,6 +14,9 @@ struct LibraryView: View {
 
     @State private var playlist: Playlist?
     @State private var activeLetter: String?
+    @State private var isKeyboardVisible = false
+    @State private var isClosedScreen = false
+    @State private var areFavoritesOpen = false
     @State private var isChoosingPlaylist = false
     @State private var isSearchPresented = false
     @FocusState private var isSearchFocused: Bool
@@ -26,6 +29,21 @@ struct LibraryView: View {
         guard !query.isEmpty else { return scope }
         // Une recherche couvre toute la bibliothèque, pas seulement la playlist ouverte.
         return library.songs.filter { ($0.title + " " + $0.artist).localizedStandardContains(query) }
+    }
+
+    // Le clavier réduit la hauteur disponible : les lettres disparaissent au lieu de rétrécir.
+    private var showsAlphabet: Bool { query.isEmpty && !filtered.isEmpty && !isKeyboardVisible }
+
+    /// Tous mes tabs et les listes automatiques sont triés par titre. Une playlist du compte
+    /// garde son ordre, celui du set, donc pas de séparation par lettre.
+    private var isAlphabetical: Bool {
+        guard let playlist else { return true }
+        return !library.playlists.contains(playlist)
+    }
+
+    private var letterGroups: [(letter: String, songs: [Song])] {
+        let groups = Dictionary(grouping: scope, by: \.initial)
+        return Self.letters.compactMap { letter in groups[letter].map { (letter, $0) } }
     }
 
     private var countLabel: String {
@@ -41,11 +59,30 @@ struct LibraryView: View {
                     favoritesSection
                 }
                 if !filtered.isEmpty {
-                    Section(countLabel) {
-                        ForEach(filtered) { row($0) }
-                            .onDelete { offsets in
-                                offsets.map { filtered[$0] }.forEach(library.remove)
+                    if query.isEmpty, isAlphabetical {
+                        Text(countLabel)
+                            .font(.subheadline).foregroundStyle(.secondary)
+                            .listRowBackground(Color.clear)
+                        ForEach(letterGroups, id: \.letter) { group in
+                            Section {
+                                ForEach(group.songs) { row($0) }
+                                    .onDelete { offsets in
+                                        offsets.map { group.songs[$0] }.forEach(library.remove)
+                                    }
+                            } header: {
+                                Text(group.letter)
+                                    .font(.title2.bold())
+                                    .foregroundStyle(Palette.chord)
+                                    .id("lettre-" + group.letter)
                             }
+                        }
+                    } else {
+                        Section(countLabel) {
+                            ForEach(filtered) { row($0) }
+                                .onDelete { offsets in
+                                    offsets.map { filtered[$0] }.forEach(library.remove)
+                                }
+                        }
                     }
                 }
                 if isSearching {
@@ -61,9 +98,9 @@ struct LibraryView: View {
                     }
                 }
             }
-            .padding(.trailing, query.isEmpty ? 46 : 0)
+            .padding(.trailing, showsAlphabet ? 46 : 0)
             .overlay(alignment: .trailing) {
-                if query.isEmpty, !filtered.isEmpty {
+                if showsAlphabet {
                     alphabetBar(proxy)
                 }
             }
@@ -88,7 +125,7 @@ struct LibraryView: View {
                 try? await Task.sleep(for: .seconds(0.7))
                 if !Task.isCancelled { await search() }
             }
-            .navigationTitle(playlist?.name ?? "Tous mes tabs")
+            .navigationTitle(playlist?.name ?? "Toutes les tabs")
             // Titre fixe : la colonne de lettres ne bouge pas pendant le défilement.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -111,6 +148,19 @@ struct LibraryView: View {
             }
         }
         .environment(loader)
+        // L'écran fermé fait 466 points sur son petit côté, l'écran ouvert plus de 620.
+        .onGeometryChange(for: Bool.self) { min($0.size.width, $0.size.height) < 560 } action: { closed in
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-ferme") { isClosedScreen = true; return }
+            #endif
+            isClosedScreen = closed
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+        }
         .sheet(isPresented: $isChoosingPlaylist) { playlistChooser }
         .task {
             // Rouvre la dernière playlist utilisée.
@@ -176,9 +226,29 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.chord)
+            } else if isClosedScreen && !areFavoritesOpen {
+                // Écran fermé : une seule tuile, les favoris se déplient quand on la touche.
+                Button {
+                    areFavoritesOpen = true
+                } label: {
+                    HStack {
+                        Text(playlist?.name ?? "Toutes les tabs").font(.title3.bold()).lineLimit(1)
+                        Spacer()
+                        Text("\(scope.count)").monospacedDigit().opacity(0.7)
+                        Image(systemName: "chevron.down").font(.headline)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity, minHeight: 60)
+                    .background(Palette.chord, in: .rect(cornerRadius: 14))
+                    .foregroundStyle(.black)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 8)], spacing: 8) {
-                    favoriteTile("Tous mes tabs", count: library.songs.count, isSelected: playlist == nil) { select(nil) }
+                    favoriteTile("Toutes les tabs", count: library.songs.count, isSelected: playlist == nil) { select(nil) }
                     ForEach(favorites) { item in
                         favoriteTile(item.name, count: item.ids.count, isSelected: playlist?.name == item.name) { select(item) }
                     }
@@ -226,7 +296,11 @@ struct LibraryView: View {
                 guard letter != activeLetter else { return }
                 activeLetter = letter
                 if let song = scope.first(where: { $0.initial == letter }) {
-                    proxy.scrollTo(song.id, anchor: .top)
+                    if isAlphabetical {
+                        proxy.scrollTo("lettre-" + letter, anchor: .top)
+                    } else {
+                        proxy.scrollTo(song.id, anchor: .top)
+                    }
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
             }.onEnded { _ in activeLetter = nil })
@@ -251,6 +325,7 @@ struct LibraryView: View {
         playlist = item
         savedPlaylist = item?.name ?? ""
         isChoosingPlaylist = false
+        areFavoritesOpen = false
     }
 
     private var playlistChooser: some View {
@@ -259,7 +334,7 @@ struct LibraryView: View {
                 Button {
                     select(nil)
                 } label: {
-                    chooserLabel("Tous mes tabs", count: library.songs.count, selected: playlist == nil)
+                    chooserLabel("Toutes les tabs", count: library.songs.count, selected: playlist == nil)
                 }
                 chooserSection("Mes playlists", library.playlists)
                 chooserSection("Par décennie", library.decadePlaylists)

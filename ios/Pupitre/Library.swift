@@ -145,7 +145,8 @@ final class Library {
     private func sortAlphabetically() {
         alphabetical = songs
             .map { (key: $0.title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil), song: $0) }
-            .sorted { $0.key < $1.key }
+            // Ce qui ne commence pas par une lettre passe après le Z, comme dans la colonne de lettres.
+            .sorted { ($0.song.initial == "#" ? 1 : 0, $0.key) < ($1.song.initial == "#" ? 1 : 0, $1.key) }
             .map(\.song)
     }
 
