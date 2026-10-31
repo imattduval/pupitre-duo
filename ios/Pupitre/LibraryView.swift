@@ -161,12 +161,17 @@ struct LibraryView: View {
                             .contentShape(.capsule)
                     }
                     .padding(.bottom, 12)
+                    .transition(.opacity)
                     .task {
                         try? await Task.sleep(for: .seconds(5))
-                        searchOrigin = nil
+                        if !Task.isCancelled {
+                            withAnimation(.easeOut(duration: 0.8)) { searchOrigin = nil }
+                        }
                     }
                 }
             }
+            // Fondu aussi quand la frappe commence.
+            .animation(.easeOut(duration: 0.3), value: query.isEmpty)
             .overlay(alignment: .bottom) {
                 if let message {
                     Text(message)
