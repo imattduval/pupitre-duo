@@ -107,6 +107,8 @@ struct LibraryView: View {
                     }
                 }
             }
+            // Nouvelle playlist : liste reconstruite d'un coup, plus rapide que comparer 995 lignes une à une.
+            .id(current?.name ?? "")
             // Largeur fixe : la liste ne bouge pas quand les lettres s'effacent.
             .padding(.trailing, 46)
             .overlay(alignment: .trailing) {

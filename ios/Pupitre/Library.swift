@@ -16,7 +16,11 @@ struct Song: Codable, Identifiable, Equatable {
     var id: String { url }
     var isReady: Bool { text != nil }
     /// Le numéro UG, à la fin du lien quelle que soit sa forme.
-    var tabID: Int? { url.firstMatch(of: /(\d+)$/).flatMap { Int($0.output.1) } }
+    /// Lu à la main : une expression régulière, appelée sur 995 morceaux à chaque écran, ralentissait tout.
+    var tabID: Int? {
+        let digits = url.utf8.reversed().prefix { $0 >= 48 && $0 <= 57 }
+        return digits.isEmpty ? nil : Int(String(decoding: digits.reversed(), as: UTF8.self))
+    }
     /// La lettre de la colonne alphabétique ; « # » pour ce qui ne commence pas par une lettre.
     var initial: String {
         let first = title.folding(options: .diacriticInsensitive, locale: nil).uppercased().first
@@ -78,7 +82,7 @@ final class Library {
             UserDefaults.standard.set(true, forKey: "taille.140")
         }
         loadAccount()
-        sortAlphabetically()
+        refresh()
     }
 
     /// La liste du compte UG (titres et liens, sans paroles). Les morceaux ne sont ajoutés
@@ -110,8 +114,31 @@ final class Library {
         return Dictionary(uniqueKeysWithValues: entries.compactMap { key, value in Int(key).map { ($0, value) } })
     }()
 
+    /// Listes calculées une fois à chaque changement de la bibliothèque, pas à chaque affichage.
+    private(set) var decadePlaylists: [Playlist] = []
+    private(set) var languagePlaylists: [Playlist] = []
+    private(set) var history = Playlist(name: Library.historyName, ids: [], isHistory: true)
+    @ObservationIgnored private var byID: [Int: Song] = [:]
+    @ObservationIgnored private var scopes: [String: [Song]] = [:]
+
+    private func refresh() {
+        alphabetical = songs
+            .map { (key: $0.title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil), song: $0) }
+            // Ce qui ne commence pas par une lettre passe après le Z, comme dans la colonne de lettres.
+            .sorted { ($0.song.initial == "#" ? 1 : 0, $0.key) < ($1.song.initial == "#" ? 1 : 0, $1.key) }
+            .map(\.song)
+        byID = [:]
+        for song in songs {
+            if let id = song.tabID { byID[id] = song }
+        }
+        scopes = [:]
+        decadePlaylists = makeDecadePlaylists()
+        languagePlaylists = makeLanguagePlaylists()
+        history = makeHistory()
+    }
+
     /// Listes créées automatiquement. Vides tant que le classement n'est pas livré avec l'app.
-    var decadePlaylists: [Playlist] {
+    private func makeDecadePlaylists() -> [Playlist] {
         guard !classement.isEmpty else { return [] }
         var groups: [Int: [Int]] = [:]
         for song in alphabetical {
@@ -124,7 +151,7 @@ final class Library {
         }
     }
 
-    var languagePlaylists: [Playlist] {
+    private func makeLanguagePlaylists() -> [Playlist] {
         guard !classement.isEmpty else { return [] }
         var groups: [String: [Int]] = [:]
         for song in alphabetical {
@@ -155,19 +182,11 @@ final class Library {
     /// Toute la bibliothèque de A à Z, sans tenir compte des accents.
     private(set) var alphabetical: [Song] = []
 
-    private func sortAlphabetically() {
-        alphabetical = songs
-            .map { (key: $0.title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil), song: $0) }
-            // Ce qui ne commence pas par une lettre passe après le Z, comme dans la colonne de lettres.
-            .sorted { ($0.song.initial == "#" ? 1 : 0, $0.key) < ($1.song.initial == "#" ? 1 : 0, $1.key) }
-            .map(\.song)
-    }
-
     static let historyName = "Historique"
 
     /// Tous les morceaux déjà ouverts, du plus récent au plus ancien. Ceux ouverts avant que l'app
     /// note les dates (paroles déjà chargées, sans date) suivent, de A à Z.
-    var history: Playlist {
+    private func makeHistory() -> Playlist {
         let dated = songs
             .compactMap { song in playedAt[song.url].flatMap { date in song.tabID.map { ($0, date) } } }
             .sorted { $0.1 > $1.1 }
@@ -180,6 +199,7 @@ final class Library {
 
     func markPlayed(_ song: Song) {
         playedAt[song.url] = .now
+        history = makeHistory()
         if let data = try? JSONEncoder().encode(playedAt) {
             try? data.write(to: historyFile, options: .atomic)
         }
@@ -187,15 +207,13 @@ final class Library {
 
     func songs(in playlist: Playlist?) -> [Song] {
         guard let playlist else { return alphabetical }
-        if playlist.isHistory {
-            var byID: [Int: Song] = [:]
-            for song in songs {
-                if let id = song.tabID { byID[id] = song }
-            }
-            return playlist.ids.compactMap { byID[$0] }
-        }
+        // L'historique suit l'ordre de la liste reçue : le lecteur garde celle de son ouverture.
+        if playlist.isHistory { return playlist.ids.compactMap { byID[$0] } }
+        if let cached = scopes[playlist.name] { return cached }
         let ids = Set(playlist.ids)
-        return alphabetical.filter { $0.tabID.map(ids.contains) ?? false }
+        let result = alphabetical.filter { $0.tabID.map(ids.contains) ?? false }
+        scopes[playlist.name] = result
+        return result
     }
 
     var readyCount: Int { songs.filter(\.isReady).count }
@@ -257,7 +275,7 @@ final class Library {
     }
 
     private func save() {
-        sortAlphabetically()
+        refresh()
         if let data = try? JSONEncoder().encode(songs) {
             try? data.write(to: file, options: .atomic)
         }
