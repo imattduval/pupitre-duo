@@ -138,6 +138,7 @@ struct LibraryView: View {
                 guard query.count >= 3 else {
                     results = []
                     searched = false
+                    isSearching = false
                     return
                 }
                 try? await Task.sleep(for: .seconds(0.7))
@@ -226,6 +227,14 @@ struct LibraryView: View {
             }
         }
         #endif
+        // Un morceau ouvert depuis la recherche : au retour, la barre est vide et refermée.
+        .onChange(of: playing?.id) { _, id in
+            guard id != nil, !query.isEmpty || isSearchPresented else { return }
+            query = ""
+            results = []
+            searched = false
+            isSearchPresented = false
+        }
         .fullScreenCover(item: $playing, onDismiss: { resumesPlayer = false }) { song in
             PlayerView(song: song, playlist: current, resume: resumesPlayer, onSearch: { openSearch(from: $0) })
                 .environment(loader)
@@ -507,16 +516,25 @@ struct LibraryView: View {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
         isSearching = true
-        defer { isSearching = false; searched = true }
         do {
             let found = try await loader.search(text)
-            guard query.trimmingCharacters(in: .whitespaces) == text else { return }
+            // Une frappe plus récente a relancé la recherche : c'est elle qui affichera ses résultats.
+            guard !Task.isCancelled, query.trimmingCharacters(in: .whitespaces) == text else { return }
             results = found.sorted { ($0.votes ?? 0) > ($1.votes ?? 0) }
+            isSearching = false
+            searched = true
+        } catch is CancellationError {
+            return
         } catch LoadError.needsBrowser {
+            isSearching = false
+            searched = true
             results = []
             show("Ultimate Guitar demande une vérification.")
             browsing = BrowserTarget(url: Self.home)
         } catch {
+            guard !Task.isCancelled else { return }
+            isSearching = false
+            searched = true
             results = []
             show("Ultimate Guitar ne répond pas sur ce réseau. Essaie en Wi-Fi.")
         }
