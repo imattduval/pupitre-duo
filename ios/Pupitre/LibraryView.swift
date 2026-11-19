@@ -24,7 +24,10 @@ struct LibraryView: View {
     @AppStorage("playlist.ouverte") private var savedPlaylist = ""
     @AppStorage("playlists.favorites") private var savedFavorites = ""
 
-    private var scope: [Song] { library.songs(in: playlist) }
+    private var isHistory: Bool { playlist?.isHistory == true }
+    /// L'historique se relit à chaque fois : il change à chaque morceau ouvert.
+    private var current: Playlist? { isHistory ? library.history : playlist }
+    private var scope: [Song] { library.songs(in: current) }
 
     private var filtered: [Song] {
         guard !query.isEmpty else { return scope }
@@ -32,13 +35,13 @@ struct LibraryView: View {
         return library.songs.filter { ($0.title + " " + $0.artist).localizedStandardContains(query) }
     }
 
-    private var showsAlphabet: Bool { query.isEmpty && !filtered.isEmpty }
+    /// Toutes les listes sont triées par titre, sauf l'historique, du plus récent au plus ancien.
+    private var isAlphabetical: Bool { !isHistory }
 
-    /// Tous mes tabs et les listes automatiques sont triés par titre. Une playlist du compte
-    /// garde son ordre, celui du set, donc pas de séparation par lettre.
-    private var isAlphabetical: Bool {
-        guard let playlist else { return true }
-        return !library.playlists.contains(playlist)
+    private var showsAlphabet: Bool { query.isEmpty && !filtered.isEmpty && isAlphabetical }
+
+    private var allPlaylists: [Playlist] {
+        [library.history] + library.playlists + library.decadePlaylists + library.languagePlaylists
     }
 
     private var letterGroups: [(letter: String, songs: [Song])] {
@@ -115,7 +118,11 @@ struct LibraryView: View {
             }
             }
             .overlay {
-                if library.songs.isEmpty && !searched && !isSearching {
+                if isHistory, scope.isEmpty, query.isEmpty {
+                    ContentUnavailableView("Aucun morceau joué",
+                                           systemImage: "clock",
+                                           description: Text("Les morceaux ouverts s'ajoutent ici, du plus récent au plus ancien."))
+                } else if library.songs.isEmpty && !searched && !isSearching {
                     ContentUnavailableView("Cherche un morceau",
                                            systemImage: "music.note.list",
                                            description: Text("Touche la loupe, écris un titre ou un artiste, puis valide."))
@@ -197,8 +204,7 @@ struct LibraryView: View {
         .sheet(isPresented: $isChoosingPlaylist) { playlistChooser }
         .task {
             // Rouvre la dernière playlist utilisée.
-            let all = library.playlists + library.decadePlaylists + library.languagePlaylists
-            playlist = all.first { $0.name == savedPlaylist }
+            playlist = allPlaylists.first { $0.name == savedPlaylist }
         }
         #if DEBUG
         // Test sur appareil : ouvre un morceau déjà chargé (devicectl ne peut pas toucher l'écran).
@@ -221,7 +227,7 @@ struct LibraryView: View {
         }
         #endif
         .fullScreenCover(item: $playing, onDismiss: { resumesPlayer = false }) { song in
-            PlayerView(song: song, playlist: playlist, resume: resumesPlayer, onSearch: { openSearch(from: $0) })
+            PlayerView(song: song, playlist: current, resume: resumesPlayer, onSearch: { openSearch(from: $0) })
                 .environment(loader)
         }
         .sheet(item: $browsing) { target in
@@ -235,8 +241,7 @@ struct LibraryView: View {
     }
 
     private var favorites: [Playlist] {
-        let all = library.playlists + library.decadePlaylists + library.languagePlaylists
-        return favoriteNames.compactMap { name in all.first { $0.name == name } }
+        favoriteNames.compactMap { name in allPlaylists.first { $0.name == name } }
     }
 
     private func toggleFavorite(_ name: String) {
@@ -328,16 +333,12 @@ struct LibraryView: View {
                 let letter = Self.letters[min(Self.letters.count - 1, max(0, index))]
                 guard letter != activeLetter else { return }
                 activeLetter = letter
-                if let song = scope.first(where: { $0.initial == letter }) {
-                    if isAlphabetical {
+                if scope.contains(where: { $0.initial == letter }) {
+                    proxy.scrollTo("lettre-" + letter, anchor: .top)
+                    // Après un grand saut, la position n'est juste qu'une fois les lignes mesurées.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(80))
                         proxy.scrollTo("lettre-" + letter, anchor: .top)
-                        // Après un grand saut, la position n'est juste qu'une fois les lignes mesurées.
-                        Task {
-                            try? await Task.sleep(for: .milliseconds(80))
-                            proxy.scrollTo("lettre-" + letter, anchor: .top)
-                        }
-                    } else {
-                        proxy.scrollTo(song.id, anchor: .top)
                     }
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
@@ -387,6 +388,7 @@ struct LibraryView: View {
                 } label: {
                     chooserLabel("Toutes les tabs", count: library.songs.count, selected: playlist == nil)
                 }
+                chooserSection("Déjà joués", [library.history])
                 chooserSection("Mes playlists", library.playlists)
                 chooserSection("Par décennie", library.decadePlaylists)
                 chooserSection("Par langue", library.languagePlaylists)
@@ -453,6 +455,10 @@ struct LibraryView: View {
             HStack {
                 labels(title: song.title, artist: song.artist)
                 Spacer()
+                if isHistory, query.isEmpty, let date = library.playedAt[song.url] {
+                    Text(date, format: .relative(presentation: .named))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
                 if loadingURL == song.url {
                     ProgressView()
                 } else if !song.isReady {

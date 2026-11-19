@@ -119,6 +119,8 @@ struct PlayerView: View {
                 withAnimation(.easeOut(duration: 0.6)) { controlsHidden = true }
             }
         }
+        // Chaque morceau affiché, y compris par Suivant et Précédent, entre dans l'historique.
+        .onChange(of: song.url, initial: true) { library.markPlayed(song) }
         .task {
             // iOS peut rendre le clavier à la recherche pendant la transition vers le lecteur.
             dismissKeyboard()

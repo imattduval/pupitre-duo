@@ -27,8 +27,12 @@ struct Song: Codable, Identifiable, Equatable {
 struct Playlist: Decodable, Identifiable, Hashable {
     let name: String
     let ids: [Int]
+    /// L'historique garde l'ordre des écoutes ; toutes les autres listes sont triées de A à Z.
+    var isHistory = false
 
     var id: String { name }
+
+    private enum CodingKeys: String, CodingKey { case name, ids }
 }
 
 private struct Account: Decodable {
@@ -49,11 +53,20 @@ private struct Account: Decodable {
 final class Library {
     private(set) var songs: [Song] = []
     private(set) var playlists: [Playlist] = []
+    /// Dernière ouverture de chaque morceau, par lien. Fichier à part : le lecteur réenregistre
+    /// sa copie du morceau et effacerait une date rangée dans le morceau lui-même.
+    private(set) var playedAt: [String: Date] = [:]
     private let file: URL
+    private let historyFile: URL
 
     init() {
         let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         file = folder.appending(path: "bibliotheque.json")
+        historyFile = folder.appending(path: "historique.json")
+        if let data = try? Data(contentsOf: historyFile),
+           let saved = try? JSONDecoder().decode([String: Date].self, from: data) {
+            playedAt = saved
+        }
         if let data = try? Data(contentsOf: file),
            let saved = try? JSONDecoder().decode([Song].self, from: data) {
             songs = saved
@@ -150,13 +163,35 @@ final class Library {
             .map(\.song)
     }
 
+    static let historyName = "Historique"
+
+    /// Tous les morceaux déjà ouverts, du plus récent au plus ancien.
+    var history: Playlist {
+        let ids = songs
+            .compactMap { song in playedAt[song.url].flatMap { date in song.tabID.map { ($0, date) } } }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+        return Playlist(name: Self.historyName, ids: ids, isHistory: true)
+    }
+
+    func markPlayed(_ song: Song) {
+        playedAt[song.url] = .now
+        if let data = try? JSONEncoder().encode(playedAt) {
+            try? data.write(to: historyFile, options: .atomic)
+        }
+    }
+
     func songs(in playlist: Playlist?) -> [Song] {
         guard let playlist else { return alphabetical }
-        var byID: [Int: Song] = [:]
-        for song in songs {
-            if let id = song.tabID { byID[id] = song }
+        if playlist.isHistory {
+            var byID: [Int: Song] = [:]
+            for song in songs {
+                if let id = song.tabID { byID[id] = song }
+            }
+            return playlist.ids.compactMap { byID[$0] }
         }
-        return playlist.ids.compactMap { byID[$0] }
+        let ids = Set(playlist.ids)
+        return alphabetical.filter { $0.tabID.map(ids.contains) ?? false }
     }
 
     var readyCount: Int { songs.filter(\.isReady).count }
@@ -205,6 +240,7 @@ final class Library {
 
     func remove(_ song: Song) {
         songs.removeAll { $0.url == song.url }
+        playedAt[song.url] = nil
         save()
     }
 
