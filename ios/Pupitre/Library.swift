@@ -165,13 +165,17 @@ final class Library {
 
     static let historyName = "Historique"
 
-    /// Tous les morceaux déjà ouverts, du plus récent au plus ancien.
+    /// Tous les morceaux déjà ouverts, du plus récent au plus ancien. Ceux ouverts avant que l'app
+    /// note les dates (paroles déjà chargées, sans date) suivent, de A à Z.
     var history: Playlist {
-        let ids = songs
+        let dated = songs
             .compactMap { song in playedAt[song.url].flatMap { date in song.tabID.map { ($0, date) } } }
             .sorted { $0.1 > $1.1 }
             .map(\.0)
-        return Playlist(name: Self.historyName, ids: ids, isHistory: true)
+        let undated = alphabetical
+            .filter { $0.isReady && playedAt[$0.url] == nil }
+            .compactMap(\.tabID)
+        return Playlist(name: Self.historyName, ids: dated + undated, isHistory: true)
     }
 
     func markPlayed(_ song: Song) {

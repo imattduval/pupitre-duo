@@ -464,9 +464,13 @@ struct LibraryView: View {
             HStack {
                 labels(title: song.title, artist: song.artist)
                 Spacer()
-                if isHistory, query.isEmpty, let date = library.playedAt[song.url] {
-                    Text(date, format: .relative(presentation: .named))
-                        .font(.subheadline).foregroundStyle(.secondary)
+                if isHistory, query.isEmpty {
+                    if let date = library.playedAt[song.url] {
+                        Text(date, format: .relative(presentation: .named))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    } else {
+                        Text("date inconnue").font(.subheadline).foregroundStyle(.secondary)
+                    }
                 }
                 if loadingURL == song.url {
                     ProgressView()
