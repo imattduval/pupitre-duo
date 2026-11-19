@@ -5,6 +5,12 @@ struct LibraryView: View {
     @Environment(WorkList.self) private var workList
     @Environment(Concerts.self) private var concerts
     @Environment(OfflineLoader.self) private var offline
+    /// Les morceaux étoilés (« Mes favoris ») ; `favorites` plus bas, ce sont les playlists favorites.
+    @Environment(Favorites.self) private var favoriteSongs
+    @Environment(PlayTransitions.self) private var transitions
+    @Environment(Moods.self) private var moods
+    @Environment(Backup.self) private var backup
+    @Environment(BackupSheet.self) private var backupSheet
     @State private var loader = UGLoader()
     @State private var query = ""
     @State private var results: [SearchResult] = []
@@ -25,6 +31,7 @@ struct LibraryView: View {
     @State private var isSearchPresented = false
     @State private var showsMostPlayed = false
     @State private var isManagingConcerts = false
+    @State private var opensBackup = false
     @State private var pendingSong: Song?
     @State private var hasShownBlockedPage = false
     /// Recalculées seulement quand les concerts ou la bibliothèque changent : relier liens et morceaux coûte cher.
@@ -34,10 +41,11 @@ struct LibraryView: View {
     @AppStorage("playlists.favorites") private var savedFavorites = ""
 
     private var isHistory: Bool { playlist?.isHistory == true }
-    /// L'historique et « À travailler » se relisent à chaque fois : ils changent pendant qu'on joue.
+    /// L'historique, « À travailler » et « Mes favoris » se relisent à chaque fois : ils changent pendant qu'on joue.
     private var current: Playlist? {
         if isHistory { return showsMostPlayed ? library.mostPlayed : library.history }
         if playlist?.name == WorkList.name { return workList.playlist(in: library) }
+        if playlist?.name == Favorites.name { return favoriteSongs.playlist(in: library) }
         return playlist
     }
     private var scope: [Song] { library.songs(in: current) }
@@ -54,14 +62,14 @@ struct LibraryView: View {
     private var showsAlphabet: Bool { query.isEmpty && !filtered.isEmpty && isAlphabetical }
 
     private var allPlaylists: [Playlist] {
-        [library.history, workList.playlist(in: library)] + concertPlaylists
+        [library.history, workList.playlist(in: library), favoriteSongs.playlist(in: library)] + concertPlaylists
             + library.playlists + library.decadePlaylists + library.languagePlaylists
     }
 
     /// Jamais toute la bibliothèque d'un coup : seulement les listes faites à la main.
     private var canLoadOffline: Bool {
         guard let name = current?.name else { return false }
-        return name == WorkList.name || name.hasPrefix(Concerts.prefix) || library.playlists.contains { $0.name == name }
+        return name == WorkList.name || name == Favorites.name || name.hasPrefix(Concerts.prefix) || library.playlists.contains { $0.name == name }
     }
 
     private var letterGroups: [(letter: String, songs: [Song])] {
@@ -161,6 +169,10 @@ struct LibraryView: View {
                     ContentUnavailableView("Rien à travailler",
                                            systemImage: WorkList.icon,
                                            description: Text("Dans le lecteur, touche le drapeau d'un morceau pour le retrouver ici."))
+                } else if current?.name == Favorites.name, scope.isEmpty, query.isEmpty {
+                    ContentUnavailableView("Aucun favori",
+                                           systemImage: Favorites.icon,
+                                           description: Text("Dans le lecteur, touche l'étoile d'un morceau pour le retrouver ici."))
                 } else if library.songs.isEmpty && !searched && !isSearching {
                     ContentUnavailableView("Cherche un morceau",
                                            systemImage: "music.note.list",
@@ -243,7 +255,10 @@ struct LibraryView: View {
         }
         // Le morceau d'un concert s'ouvre une fois les feuilles refermées : deux présentations à la fois échouent.
         .sheet(isPresented: $isChoosingPlaylist, onDismiss: {
-            if let song = pendingSong { pendingSong = nil; play(song) } else { openBlockedPage() }
+            if opensBackup {
+                opensBackup = false
+                backupSheet.isShown = true
+            } else if let song = pendingSong { pendingSong = nil; play(song) } else { openBlockedPage() }
         }) { stores(playlistChooser) }
         .task {
             // Rouvre la dernière playlist utilisée.
@@ -313,6 +328,7 @@ struct LibraryView: View {
     /// Le lecteur et les feuilles sont présentés hors de la pile : on leur repasse ce qu'elle partage.
     private func stores(_ view: some View) -> some View {
         view.environment(loader).environment(workList).environment(concerts).environment(offline)
+            .environment(favoriteSongs).environment(transitions).environment(moods).environment(backup)
     }
 
     /// Concert renommé, supprimé ou réordonné : la playlist ouverte et les favoris suivent.
@@ -331,7 +347,7 @@ struct LibraryView: View {
         }
     }
 
-    /// Dans un concert ou « À travailler », balayer retire le morceau de la liste, pas de la bibliothèque.
+    /// Dans un concert, « À travailler » ou « Mes favoris », balayer retire le morceau de la liste, pas de la bibliothèque.
     private func deleteRows(_ removed: [Song]) {
         let name = query.isEmpty ? current?.name : nil
         if let name, let concert = concerts.concert(forPlaylistName: name) {
@@ -343,6 +359,8 @@ struct LibraryView: View {
             concerts.remove(at: IndexSet(offsets), from: concert.id)
         } else if name == WorkList.name {
             removed.forEach { workList.remove($0.url) }
+        } else if name == Favorites.name {
+            removed.forEach { favoriteSongs.remove($0.url) }
         } else {
             removed.forEach(library.remove)
         }
@@ -379,10 +397,12 @@ struct LibraryView: View {
 
     /// Grosses tuiles en haut de l'accueil pour passer d'une playlist favorite à l'autre.
     private var favoritesSection: some View {
-        // « À travailler » a toujours sa tuile : en favori aussi, elle ne doit pas apparaître deux fois.
+        // « À travailler » et « Mes favoris » ont toujours leur tuile : elles ne doivent pas apparaître deux fois.
         let work = workList.playlist(in: library)
+        let starred = favoriteSongs.playlist(in: library)
         let isWorkSelected = playlist?.name == WorkList.name
-        let others = favorites.filter { $0.name != WorkList.name }
+        let isStarredSelected = playlist?.name == Favorites.name
+        let others = favorites.filter { $0.name != WorkList.name && $0.name != Favorites.name }
         return Section {
             if isClosedScreen && !areFavoritesOpen {
                 // Écran fermé : une seule tuile, les favoris se déplient quand on la touche.
@@ -403,18 +423,8 @@ struct LibraryView: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    Button {
-                        select(work)
-                    } label: {
-                        Image(systemName: isWorkSelected ? WorkList.icon + ".fill" : WorkList.icon)
-                            .font(.title2.bold())
-                            .frame(width: 60, height: 60)
-                            .background(isWorkSelected ? Palette.button : Palette.panel, in: .rect(cornerRadius: 14))
-                            .foregroundStyle(isWorkSelected ? Color.black : Palette.chord)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(WorkList.name)
+                    closedSquare(WorkList.name, icon: WorkList.icon, isSelected: isWorkSelected) { select(work) }
+                    closedSquare(Favorites.name, icon: Favorites.icon, isSelected: isStarredSelected) { select(starred) }
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -422,6 +432,7 @@ struct LibraryView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 8)], spacing: 8) {
                     favoriteTile("Toutes les tabs", count: library.songs.count, isSelected: playlist == nil) { select(nil) }
                     favoriteTile(WorkList.name, icon: WorkList.icon, count: work.ids.count, isSelected: isWorkSelected) { select(work) }
+                    favoriteTile(Favorites.name, icon: Favorites.icon, count: starred.ids.count, isSelected: isStarredSelected) { select(starred) }
                     ForEach(others) { item in
                         favoriteTile(item.name, count: item.ids.count, isSelected: playlist?.name == item.name) { select(item) }
                     }
@@ -442,6 +453,21 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    /// Carré de 60 points à côté de la tuile repliée de l'écran fermé.
+    private func closedSquare(_ name: String, icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: isSelected ? icon + ".fill" : icon)
+                .font(.title2.bold())
+                .frame(width: 60, height: 60)
+                .background(isSelected ? Palette.button : Palette.panel, in: .rect(cornerRadius: 14))
+                .foregroundStyle(isSelected ? Color.black : Palette.chord)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func favoriteTile(_ name: String, icon: String? = nil, count: Int, isSelected: Bool,
@@ -539,14 +565,8 @@ struct LibraryView: View {
                 } label: {
                     chooserLabel("Toutes les tabs", count: library.songs.count, selected: playlist == nil)
                 }
-                Section(WorkList.name) {
-                    let work = workList.playlist(in: library)
-                    Button {
-                        select(work)
-                    } label: {
-                        chooserLabel(work.name, icon: WorkList.icon, count: work.ids.count, selected: playlist?.name == work.name)
-                    }
-                }
+                fixedSection(workList.playlist(in: library), icon: WorkList.icon)
+                fixedSection(favoriteSongs.playlist(in: library), icon: Favorites.icon)
                 chooserSection("Déjà joués", [library.history])
                 Section("Concerts") {
                     ForEach(concertPlaylists) { chooserRow($0) }
@@ -563,6 +583,27 @@ struct LibraryView: View {
                 chooserSection("Mes playlists", library.playlists)
                 chooserSection("Par décennie", library.decadePlaylists)
                 chooserSection("Par langue", library.languagePlaylists)
+                Section("Réglages") {
+                    Button {
+                        // Ouverte à la racine une fois cette feuille refermée : deux présentations à la fois échouent.
+                        opensBackup = true
+                        isChoosingPlaylist = false
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: backupNote == nil ? "icloud" : "exclamationmark.icloud")
+                                .foregroundStyle(Palette.chord)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Sauvegarde iCloud Drive").font(.headline)
+                                if let backupNote {
+                                    Text(backupNote).font(.subheadline).foregroundStyle(Palette.chord).lineLimit(2)
+                                }
+                            }
+                            Spacer()
+                        }
+                        .frame(minHeight: 52)
+                        .contentShape(.rect)
+                    }
+                }
             }
             .buttonStyle(.plain)
             .navigationTitle("Playlists")
@@ -576,6 +617,22 @@ struct LibraryView: View {
                 ConcertsView(onStart: startConcert)
             }
         }
+    }
+
+    /// Liste tenue par l'app (« À travailler », « Mes favoris ») : sa propre section, sans étoile de playlist favorite.
+    private func fixedSection(_ item: Playlist, icon: String) -> some View {
+        Section(item.name) {
+            Button {
+                select(item)
+            } label: {
+                chooserLabel(item.name, icon: icon, count: item.ids.count, selected: playlist?.name == item.name)
+            }
+        }
+    }
+
+    /// Ce qui demande d'aller voir la sauvegarde, en petit sous sa ligne.
+    private var backupNote: String? {
+        backup.lastError ?? (backup.awaitsChoice ? "Automatique en pause : une sauvegarde attend ton choix." : nil)
     }
 
     @ViewBuilder

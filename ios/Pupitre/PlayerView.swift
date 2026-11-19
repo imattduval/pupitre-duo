@@ -12,15 +12,21 @@ struct PlayerView: View {
     @State var song: Song
     /// Figée à l'ouverture : « Les plus joués » et « À travailler » changent pendant qu'on joue.
     @State var playlist: Playlist?
-    var resume = false
+    /// Vrai pour le seul morceau rouvert après une fausse manœuvre ; un autre morceau repart du début.
+    @State var resume = false
     let onSearch: (Song) -> Void
     @Environment(UGLoader.self) private var loader
     @Environment(WorkList.self) private var workList
+    @Environment(Favorites.self) private var favorites
+    @Environment(PlayTransitions.self) private var transitions
+    @Environment(Moods.self) private var moods
     @State private var tappedChord: TappedChord?
     @State private var isLoading = false
     @State private var message: String?
     @State private var isPlaying = false
-    @State private var lyricsOnly = false
+    @State private var mode = SheetMode.full
+    /// Suggestions du morceau dont l'adresse est notée : celles du précédent ne s'affichent jamais sous le suivant.
+    @State private var upNext: (url: String, rows: [UpNextRow]) = ("", [])
     @State private var hidesStatusBar = false
     @State private var isClosedScreen = false
     @State private var controlsHidden = false
@@ -48,17 +54,19 @@ struct PlayerView: View {
                     header(topInset: insets.top, isClosed: isClosed, trailing: insets.trailing)
                     Divider().padding(.trailing, isClosedPortrait ? insets.trailing : 0)
                 }
-                SheetView(song: song, lyricsOnly: lyricsOnly, speed: shownSpeed, isPlaying: $isPlaying,
+                SheetView(song: song, mode: mode, speed: shownSpeed, isPlaying: $isPlaying,
                           startOffset: resume ? SheetView.lastOffset : nil,
                           topInset: 0,
                           sideInset: isClosed && isWide ? 8 : 16,
+                          upNext: upNext.url == song.url ? upNext.rows : [],
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() },
                           onTap: textTapped,
                           onChord: { chord in
                               // En plein défilement, toucher le texte garde son rôle : pause ou rappel des commandes.
                               if isPlaying || controlsHidden { textTapped() } else { tappedChord = TappedChord(name: chord) }
-                          })
+                          },
+                          onUpNext: openSuggested)
                     .id(song.url)
                     .overlay {
                         if isLoading {
@@ -67,8 +75,10 @@ struct PlayerView: View {
                                 .background(.black.opacity(0.8), in: .rect(cornerRadius: 16))
                         } else if let message {
                             Text(message)
+                                .multilineTextAlignment(.center)
                                 .padding(16)
                                 .background(.black.opacity(0.9), in: .rect(cornerRadius: 22))
+                                .padding(.horizontal, 24)
                         }
                     }
               }
@@ -134,8 +144,13 @@ struct PlayerView: View {
         // moins, c'est un toucher par erreur. Changer de morceau ou fermer annule l'attente.
         .task(id: song.url) {
             try? await Task.sleep(for: .seconds(10))
-            if !Task.isCancelled { library.markPlayed(song) }
+            if !Task.isCancelled {
+                library.markPlayed(song)
+                transitions.record(song.url)
+            }
         }
+        // Jamais dans body : le moteur parcourt toute la bibliothèque, et les ambiances prennent des secondes.
+        .task(id: song.url) { await suggestNext() }
         .task {
             // iOS peut rendre le clavier à la recherche pendant la transition vers le lecteur.
             dismissKeyboard()
@@ -153,7 +168,7 @@ struct PlayerView: View {
                 Text(song.artist).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            workButton(side: false)
+            markButtons(side: false)
             if !isClosed {
                 iconButton("backward.end.fill", label: "Morceau précédent") { go(-1) }
                 iconButton("forward.end.fill", label: "Morceau suivant") { go(1) }
@@ -165,12 +180,12 @@ struct PlayerView: View {
         .frame(minHeight: max(56, topInset))
     }
 
-    // Grosses cibles pour viser sans regarder. « Défiler » et « Paroles » sont en diagonale
+    // Grosses cibles pour viser sans regarder. « Défiler » et l'affichage sont en diagonale
     // et de couleurs différentes pour ne pas les confondre.
     private var controls: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) { playButton; speed; searchButton() }
-            HStack(spacing: 8) { key; textSize; lyricsButton() }
+            HStack(spacing: 8) { key; textSize; modeButton() }
         }
         .padding(.horizontal, 8).padding(.top, 8)
         .frame(maxWidth: .infinity)
@@ -193,7 +208,7 @@ struct PlayerView: View {
             compactPlay.frame(width: 58)
             compactSpeed
             compactKey
-            compactLyrics.frame(width: 72)
+            compactMode.frame(width: 72)
             compactSearch.frame(width: 48)
         }
         .padding(.horizontal, 12).padding(.top, 8)
@@ -210,9 +225,9 @@ struct PlayerView: View {
             compactPlay
             compactSpeed
             compactKey
-            compactLyrics
+            compactMode
             // Rangée à part : trois boutons sur la première passeraient sous 44 points de large.
-            workButton(side: true)
+            HStack(spacing: 4) { markButtons(side: true) }
             Spacer(minLength: 0)
         }
     }
@@ -236,7 +251,7 @@ struct PlayerView: View {
             compactSpeed
             compactKey
             compactSize
-            lyricsButton(width: 78)
+            modeButton(width: 78)
             searchButton(width: 52)
         }
         .padding(.horizontal, 12).padding(.top, 8)
@@ -264,9 +279,10 @@ struct PlayerView: View {
         VStack(spacing: 6) {
             // Calé en bas : le vide reste sous l'heure, où iOS peut afficher ses propres éléments.
             Spacer(minLength: 0)
+            // Même ordre que l'écran fermé : retour et recherche en haut, étoile et drapeau en bas.
             HStack(spacing: 4) {
                 sideButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
-                workButton(side: true)
+                compactSearch
             }
             HStack(spacing: 4) {
                 sideButton("backward.end.fill", label: "Morceau précédent", height: 46) { go(-1) }
@@ -276,14 +292,15 @@ struct PlayerView: View {
             compactSpeed
             compactKey
             compactSize
-            compactLyrics
-            compactSearch
+            compactMode
+            // Rangée à part : trois boutons avec le retour passeraient sous 44 points de large.
+            HStack(spacing: 4) { markButtons(side: true) }
         }
     }
 
-    private var compactLyrics: some View {
-        Button { lyricsOnly.toggle() } label: {
-            Text(lyricsOnly ? "Accords" : "Paroles")
+    private var compactMode: some View {
+        Button(action: cycleMode) {
+            Text(mode.label)
                 .font(.subheadline.bold())
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -292,7 +309,7 @@ struct PlayerView: View {
                 .foregroundStyle(.black)
                 .contentShape(.rect)
         }
-        .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
+        .accessibilityLabel(modeDescription)
     }
 
     private var compactSearch: some View {
@@ -335,17 +352,24 @@ struct PlayerView: View {
         .foregroundStyle(tint)
     }
 
-    /// Drapeau « À travailler » : rempli et jaune quand le morceau y est. Les étoiles restent aux favoris.
+    /// Étoile « Mes favoris » puis drapeau « À travailler », toujours côte à côte, remplis et jaunes quand le morceau y est.
     @ViewBuilder
-    private func workButton(side: Bool) -> some View {
-        let isIn = workList.contains(song.url)
-        let icon = isIn ? "flag.fill" : WorkList.icon
-        let label = isIn ? "Retirer de À travailler" : "Ajouter à À travailler"
-        let tint = isIn ? Palette.chord : Color.primary
+    private func markButtons(side: Bool) -> some View {
+        let isFavorite = favorites.contains(song.url)
+        markButton(isFavorite ? "star.fill" : Favorites.icon, isOn: isFavorite,
+                   label: isFavorite ? "Retirer de Mes favoris" : "Ajouter à Mes favoris", side: side, action: toggleFavorite)
+        let isWork = workList.contains(song.url)
+        markButton(isWork ? "flag.fill" : WorkList.icon, isOn: isWork,
+                   label: isWork ? "Retirer de À travailler" : "Ajouter à À travailler", side: side, action: toggleWork)
+    }
+
+    @ViewBuilder
+    private func markButton(_ icon: String, isOn: Bool, label: String, side: Bool, action: @escaping () -> Void) -> some View {
+        let tint = isOn ? Palette.chord : Color.primary
         if side {
-            sideButton(icon, label: label, height: 46, tint: tint, action: toggleWork)
+            sideButton(icon, label: label, height: 46, tint: tint, action: action)
         } else {
-            iconButton(icon, label: label, tint: tint, action: toggleWork)
+            iconButton(icon, label: label, tint: tint, action: action)
         }
     }
 
@@ -378,15 +402,24 @@ struct PlayerView: View {
                 minus: { changeSpeed(by: -5) }, plus: { changeSpeed(by: 5) })
     }
 
-    /// Les paroles seules ont leur propre vitesse ; tant qu'elle n'est pas réglée, 70 % de celle des accords.
+    /// Chaque affichage a sa vitesse ; tant qu'elle n'est pas réglée, 70 % du complet en paroles seules, la même en accords seuls.
     private var shownSpeed: Double {
-        guard lyricsOnly else { return song.speed }
-        return song.lyricsSpeed ?? max(5, (song.speed * 0.7 / 5).rounded() * 5)
+        switch mode {
+        case .full: song.speed
+        case .lyrics: song.lyricsSpeed ?? max(5, (song.speed * 0.7 / 5).rounded() * 5)
+        case .chords: song.chordsSpeed ?? song.speed
+        }
     }
 
     private func changeSpeed(by step: Double) {
         let value = min(150, max(5, shownSpeed + step))
-        change { if lyricsOnly { $0.lyricsSpeed = value } else { $0.speed = value } }
+        change {
+            switch mode {
+            case .full: $0.speed = value
+            case .lyrics: $0.lyricsSpeed = value
+            case .chords: $0.chordsSpeed = value
+            }
+        }
     }
 
     private var key: some View {
@@ -401,18 +434,26 @@ struct PlayerView: View {
                 plus: { change { $0.scale = min(2, $0.scale + 0.1) } })
     }
 
-    private func lyricsButton(width: CGFloat = 96) -> some View {
-        Button { lyricsOnly.toggle() } label: {
-            Text(lyricsOnly ? "Accords" : "Paroles")
+    /// Le bouton montre l'affichage en cours ; « Complet » est le plus long des trois libellés.
+    private func modeButton(width: CGFloat = 96) -> some View {
+        Button(action: cycleMode) {
+            Text(mode.label)
                 .font(.headline.bold())
                 .lineLimit(1)
-                .fixedSize()
+                .minimumScaleFactor(0.8)
                 .frame(width: width, height: 68)
                 .background(Palette.section, in: .rect(cornerRadius: 22))
                 .foregroundStyle(.black)
                 .contentShape(.rect)
         }
-        .accessibilityLabel(lyricsOnly ? "Afficher les accords" : "Paroles seules")
+        .accessibilityLabel(modeDescription)
+    }
+
+    private var modeDescription: String { "Affichage : \(mode.label). Toucher pour passer à \(mode.next.label)" }
+
+    private func cycleMode() {
+        mode = mode.next
+        controlsActivity += 1
     }
 
     private func stepper(icon: String, label: String, value: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
@@ -451,10 +492,29 @@ struct PlayerView: View {
     private func toggleWork() {
         workList.toggle(song.url)
         controlsActivity += 1
-        let text = workList.contains(song.url) ? "Ajouté à À travailler" : "Retiré"
+        flash(workList.contains(song.url) ? "Ajouté à À travailler" : "Retiré")
+    }
+
+    private func toggleFavorite() {
+        favorites.toggle(song.url)
+        controlsActivity += 1
+        guard favorites.contains(song.url) else {
+            flash("Retiré des favoris")
+            return
+        }
+        // Déjà rangé dans une playlist UG : le dire évite d'aller l'y ajouter une seconde fois.
+        let lists = song.tabID.map { id in library.playlists.filter { $0.ids.contains(id) } } ?? []
+        switch lists.count {
+        case 0: flash("Ajouté aux favoris")
+        case 1: flash("Ajouté aux favoris · déjà dans « \(lists[0].name) »", seconds: 2.5)
+        default: flash("Ajouté aux favoris · déjà dans \(lists.count) playlists", seconds: 2.5)
+        }
+    }
+
+    private func flash(_ text: String, seconds: Double = 1.5) {
         message = text
         Task {
-            try? await Task.sleep(for: .seconds(1.5))
+            try? await Task.sleep(for: .seconds(seconds))
             if message == text { message = nil }
         }
     }
@@ -479,29 +539,77 @@ struct PlayerView: View {
     /// Un morceau illisible (tab interactive, réseau) est sauté pour ne jamais rester bloqué.
     private func go(_ step: Int) {
         guard !isLoading else { return }
-        isPlaying = false
-        lyricsOnly = false
+        leaveSong()
         Task {
             isLoading = true
             defer { isLoading = false }
             var current = song
             for _ in 0..<4 {
                 guard let next = library.neighbour(of: current, step: step, in: playlist) else { return }
-                if next.isReady {
-                    song = next
-                    return
-                }
-                if let loaded = try? await loader.song(at: next.url) {
-                    library.store(url: next.url, title: next.title, artist: next.artist, text: loaded.text)
-                    if let saved = library.songs.first(where: { $0.url == next.url }) { song = saved }
+                if let ready = await loaded(next) {
+                    song = ready
                     return
                 }
                 current = next
             }
-            message = "Morceaux indisponibles. Essaie en Wi-Fi."
-            try? await Task.sleep(for: .seconds(2.5))
-            message = nil
+            // Pas d'attente ici : tant que le chargement tourne, le message resterait caché derrière.
+            flash("Morceaux indisponibles. Essaie en Wi-Fi.", seconds: 2.5)
         }
+    }
+
+    /// Ouvre une suggestion ; la playlist ne change pas, Suivant et Précédent suivent la règle de neighbour().
+    private func openSuggested(_ url: String) {
+        guard !isLoading, let next = library.songs.first(where: { $0.url == url }) else { return }
+        leaveSong()
+        Task {
+            isLoading = true
+            defer { isLoading = false }
+            if let ready = await loaded(next) { song = ready } else { flash("Morceau indisponible. Essaie en Wi-Fi.", seconds: 2.5) }
+        }
+    }
+
+    /// Changer de morceau repart du début, en affichage complet.
+    private func leaveSong() {
+        isPlaying = false
+        mode = .full
+        resume = false
+    }
+
+    /// Le morceau avec ses paroles, demandées à UG seulement s'il ne les a pas encore ; nil si elles ne viennent pas.
+    private func loaded(_ next: Song) async -> Song? {
+        if next.isReady { return next }
+        guard let page = try? await loader.song(at: next.url) else { return nil }
+        library.store(url: next.url, title: next.title, artist: next.artist, text: page.text)
+        return library.songs.first { $0.url == next.url }
+    }
+
+    /// D'abord avec les ambiances connues ; puis, si Apple Intelligence est là, après avoir noté ce morceau
+    /// et les plus proches qui n'en ont pas, pour que l'ambiance compte dès ce morceau-ci.
+    private func suggestNext() async {
+        let current = song
+        let playedAfter = transitions.next(after: current.url)
+        let songs = Dictionary(library.songs.map { ($0.url, $0) }, uniquingKeysWith: { first, _ in first })
+        func candidate(_ song: Song) -> SuggestionCandidate {
+            SuggestionCandidate(url: song.url, title: song.title, artist: song.artist,
+                                language: library.language(of: song), decade: library.decade(of: song),
+                                isReady: song.isReady, mood: moods.mood(for: song.url))
+        }
+        func refresh() -> [SuggestionCandidate] {
+            let all = library.songs.map(candidate)
+            let found = SuggestionEngine.suggestions(for: candidate(current), among: all, playedAfter: playedAfter)
+            upNext = (current.url, found.compactMap { suggestion in
+                songs[suggestion.url].map { UpNextRow(url: $0.url, title: $0.title, artist: $0.artist, reason: suggestion.reason) }
+            })
+            return all
+        }
+        let all = refresh()
+        guard moods.isAvailable else { return }
+        // Douze au plus, les plus proches d'abord : le modèle d'Apple prend plusieurs secondes par morceau.
+        let close = SuggestionEngine.suggestions(for: candidate(current), among: all.filter { $0.isReady && $0.mood == nil },
+                                                 playedAfter: playedAfter, limit: 12)
+        await moods.analyze([current] + close.compactMap { songs[$0.url] })
+        guard !Task.isCancelled else { return }
+        _ = refresh()
     }
 }
 
@@ -510,22 +618,90 @@ private struct TappedChord: Identifiable {
     var id: String { name }
 }
 
+/// Ce que montre le lecteur ; un seul bouton fait tourner complet → paroles → accords.
+enum SheetMode {
+    case full, lyrics, chords
+
+    var label: String {
+        switch self {
+        case .full: "Complet"
+        case .lyrics: "Paroles"
+        case .chords: "Accords"
+        }
+    }
+
+    var next: SheetMode {
+        switch self {
+        case .full: .lyrics
+        case .lyrics: .chords
+        case .chords: .full
+        }
+    }
+}
+
+struct UpNextRow: Equatable, Identifiable {
+    let url: String
+    let title: String
+    let artist: String
+    let reason: String
+    var id: String { url }
+}
+
+/// « À jouer ensuite », hébergé sous le texte dans le même défilement : on le voit en arrivant à la fin.
+private struct UpNextView: View {
+    let rows: [UpNextRow]
+    let onOpen: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("À jouer ensuite")
+                .font(.title3.bold())
+                .foregroundStyle(Palette.section)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(rows) { row in
+                Button { onOpen(row.url) } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.title).font(.headline).foregroundStyle(.white).lineLimit(1)
+                            Text(row.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                        Text(row.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .background(Palette.panel, in: .rect(cornerRadius: 14))
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(row.title), \(row.artist). \(row.reason)")
+                .accessibilityHint("Ouvre ce morceau")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Racine à part, hors de l'arbre de l'app : elle n'hérite ni du mode sombre ni de la teinte.
+        .environment(\.colorScheme, .dark)
+    }
+}
+
 /// Texte à chasse fixe qui ne revient jamais à la ligne, pour garder les accords alignés.
 struct SheetView: UIViewRepresentable {
     /// Où en était le dernier morceau refermé, pour y revenir après un clic par erreur.
     static var lastOffset: CGFloat = 0
 
     let song: Song
-    let lyricsOnly: Bool
+    let mode: SheetMode
     let speed: Double
     @Binding var isPlaying: Bool
     let startOffset: CGFloat?
     let topInset: CGFloat
     let sideInset: CGFloat
+    let upNext: [UpNextRow]
     let onScale: (Double) -> Void
     let onBack: () -> Void
     let onTap: () -> Void
     let onChord: (String) -> Void
+    let onUpNext: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(isPlaying: $isPlaying) }
 
@@ -540,7 +716,10 @@ struct SheetView: UIViewRepresentable {
         label.numberOfLines = 0
         label.accessibilityIdentifier = "sheet.text"
         scroll.addSubview(label)
-        scroll.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:))))
+        scroll.addSubview(context.coordinator.footer.view)
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:)))
+        tap.delegate = context.coordinator
+        scroll.addGestureRecognizer(tap)
         scroll.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinched)))
         let back = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.swipedRight))
         back.delegate = context.coordinator
@@ -564,7 +743,9 @@ struct SheetView: UIViewRepresentable {
         coordinator.onBack = onBack
         coordinator.onTap = onTap
         coordinator.onChord = onChord
-        coordinator.render(song: song, lyricsOnly: lyricsOnly)
+        coordinator.onUpNext = onUpNext
+        coordinator.render(song: song, mode: mode)
+        coordinator.setUpNext(upNext)
         coordinator.setPlaying(isPlaying)
     }
 
@@ -593,6 +774,17 @@ struct SheetView: UIViewRepresentable {
         var onBack: () -> Void = {}
         var onTap: () -> Void = {}
         var onChord: (String) -> Void = { _ in }
+        var onUpNext: (String) -> Void = { _ in }
+        private var upNext: [UpNextRow] = []
+        /// Les suggestions sous le texte. Le bouton passe par onUpNext, la vue n'est refaite que si les lignes changent.
+        fileprivate lazy var footer: UIHostingController<UpNextView> = {
+            let host = UIHostingController(rootView: UpNextView(rows: [], onOpen: { _ in }))
+            host.view.backgroundColor = .clear
+            host.view.isHidden = true
+            // Dans le défilement, les marges de sécurité décaleraient les lignes selon la position.
+            host.safeAreaRegions = []
+            return host
+        }()
         private var pinchStart: Double = 1
         private var pointsPerSecond: Double = 20
         var pendingOffset: CGFloat?
@@ -669,8 +861,21 @@ struct SheetView: UIViewRepresentable {
             return velocity.x > 0 && velocity.x > abs(velocity.y) * 2
         }
 
-        func render(song: Song, lyricsOnly: Bool) {
-            let key = "\(song.url)|\(song.transpose)|\(song.scale)|\(lyricsOnly)"
+        // Un toucher sur une suggestion reste à son bouton : ni pause, ni clavier d'accord, ni touche annulée.
+        func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            !(gesture is UITapGestureRecognizer && touch.view?.isDescendant(of: footer.view) == true)
+        }
+
+        func setUpNext(_ rows: [UpNextRow]) {
+            guard rows != upNext else { return }
+            upNext = rows
+            footer.rootView = UpNextView(rows: rows, onOpen: { [weak self] url in self?.onUpNext(url) })
+            footer.view.isHidden = rows.isEmpty
+            placeFooter()
+        }
+
+        func render(song: Song, mode: SheetMode) {
+            let key = "\(song.url)|\(song.transpose)|\(song.scale)|\(mode)"
             guard key != signature else { return }
             signature = key
             scale = song.scale
@@ -681,12 +886,14 @@ struct SheetView: UIViewRepresentable {
                 while line.last?.isWhitespace == true { line.removeLast() }
                 if Chords.isSection(line) { return Chords.Line(text: line, kind: .section) }
                 if Chords.isChordLine(line) {
-                    if lyricsOnly { return nil }
+                    if mode == .lyrics { return nil }
                     return Chords.Line(text: Chords.transpose(line, by: song.transpose, flats: flats), kind: .chord)
                 }
+                // Accords seuls : les paroles partent, les lignes vides restent pour le tri qui suit.
+                if mode == .chords, !line.isEmpty { return nil }
                 return Chords.Line(text: line, kind: .lyric)
             }
-            if lyricsOnly { lines = Chords.withoutInnerBlanks(lines) }
+            if mode != .full { lines = Chords.withoutInnerBlanks(lines) }
             layout()
         }
 
@@ -718,13 +925,27 @@ struct SheetView: UIViewRepresentable {
             label.frame = CGRect(x: inset, y: inset + topInset, width: available, height: needed.height)
             // Une vitesse de 30 parcourt tout le texte en 3 min 30, quels que soient sa taille et le mode.
             pointsPerSecond = Double(needed.height) / 210
-            scroll.contentSize = CGSize(width: scroll.bounds.width,
-                                        height: needed.height + inset + topInset + scroll.bounds.height * 0.55)
+            placeFooter()
             scroll.contentOffset.y = position * scroll.contentSize.height
             if let pendingOffset, !lines.isEmpty {
                 scroll.contentOffset.y = pendingOffset
                 self.pendingOffset = nil
             }
+        }
+
+        /// Les suggestions sous le texte. Le vide de fin rétrécit d'autant : la dernière ligne s'arrête au même endroit,
+        /// et le défilement automatique, qui va jusqu'en bas, finit sur les suggestions.
+        private func placeFooter() {
+            guard let scroll else { return }
+            var extra: CGFloat = 0
+            if !upNext.isEmpty, label.frame.width > 0 {
+                let gap: CGFloat = 40
+                let height = footer.sizeThatFits(in: CGSize(width: label.frame.width, height: .greatestFiniteMagnitude)).height
+                footer.view.frame = CGRect(x: label.frame.minX, y: label.frame.maxY + gap, width: label.frame.width, height: height)
+                extra = gap + height
+            }
+            scroll.contentSize = CGSize(width: scroll.bounds.width,
+                                        height: label.frame.maxY + extra + max(sideInset, scroll.bounds.height * 0.55 - extra))
         }
 
         func setPlaying(_ playing: Bool) {

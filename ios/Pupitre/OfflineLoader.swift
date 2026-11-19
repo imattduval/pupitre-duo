@@ -91,6 +91,8 @@ final class OfflineLoader {
                 currentURL = song.url
                 do {
                     let loaded = try await loader.song(at: song.url)
+                    // Arrêté pendant le chargement (restauration) : l'ancienne bibliothèque ne réécrit pas le fichier restauré ; une pause garde le morceau.
+                    guard !Task.isCancelled || state == .paused else { return }
                     // Supprimé pendant le chargement : il ne doit pas revenir.
                     if library.song(matching: song.url) != nil {
                         library.store(url: song.url,
