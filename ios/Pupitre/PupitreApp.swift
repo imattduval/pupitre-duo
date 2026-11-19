@@ -58,6 +58,8 @@ struct PupitreApp: App {
         offline.stop()
         moodTask?.cancel()
         moodTask = nil
+        // Un chargement lancé depuis la liste ou le navigateur garde l'ancienne : elle ne doit plus rien écrire.
+        library.isRetired = true
         library = Library()
         workList = WorkList()
         concerts = Concerts()

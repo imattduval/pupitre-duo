@@ -104,17 +104,26 @@ final class UGLoader {
 
     func song(at url: String) async throws -> LoadedSong {
         guard let address = URL(string: url) else { throw LoadError.failed }
-        let json = try await oneAtATime { try await run(url: address, script: Self.songScript) }
+        let wanted = Song(url: url, title: "", artist: "").tabID
+        let json = try await oneAtATime {
+            try await run(url: address, script: Self.songScript) { answer in
+                // Numéro UG et non adresse : UG peut rediriger vers l'autre forme du lien.
+                let shown = try? JSONDecoder().decode(LoadedSong.self, from: Data(answer.utf8))
+                return wanted == nil || shown.map { Song(url: $0.url, title: "", artist: "").tabID == wanted } == true
+            }
+        }
         return try JSONDecoder().decode(LoadedSong.self, from: Data(json.utf8))
     }
 
-    private func run(url: URL, script: String) async throws -> String {
+    private func run(url: URL, script: String, accepts: (String) -> Bool) async throws -> String {
         webView.load(URLRequest(url: url))
         try await Task.sleep(for: .seconds(1))
         var previous: String?
         for _ in 0..<50 {
-            let answer = try? await webView.evaluateJavaScript(script) as? String
+            var answer = try? await webView.evaluateJavaScript(script) as? String
             if answer == "blocked" { throw LoadError.needsBrowser }
+            // La page précédente reste affichée tant que la nouvelle n'est pas arrivée (réseau lent, hors ligne) : jamais ses paroles sous ce titre.
+            if let text = answer, !accepts(text) { answer = nil }
             // Le texte s'affiche par étapes : on attend qu'il ne bouge plus.
             if let answer, answer == previous { return answer }
             previous = answer
@@ -150,7 +159,7 @@ final class UGLoader {
     (function(){
       \#(blockCheck)
       var m=document.title.match(/^(.*?)\s+(?:CHORDS|TAB)\b.*?\bby\s+(.*?)\s+@/i);
-      var info={url:location.href.split('?')[0],title:m?m[1]:document.title,artist:m?m[2]:''};
+      var info={url:location.origin+location.pathname,title:m?m[1]:document.title,artist:m?m[2]:''};
       var store=document.querySelector('.js-store');
       if(store){try{
         var c=JSON.parse(store.dataset.content).store.page.data.tab_view.wiki_tab.content;

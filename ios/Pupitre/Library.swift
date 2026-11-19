@@ -76,6 +76,8 @@ final class Library {
         var legacy: [String]?
     }
     private var legacy: Set<String> = []
+    /// Vrai après une restauration : un chargement encore en cours sur l'ancienne bibliothèque ne réécrit pas les fichiers restaurés.
+    @ObservationIgnored var isRetired = false
     private let file: URL
     private let historyFile: URL
 
@@ -261,6 +263,7 @@ final class Library {
     }
 
     private func saveHistory() {
+        guard !isRetired else { return }
         if let data = try? JSONEncoder().encode(HistoryFile(playedAt: playedAt, counts: playCounts, legacy: Array(legacy))) {
             try? data.write(to: historyFile, options: .atomic)
         }
@@ -338,6 +341,7 @@ final class Library {
     }
 
     private func save() {
+        guard !isRetired else { return }
         refresh()
         if let data = try? JSONEncoder().encode(songs) {
             try? data.write(to: file, options: .atomic)

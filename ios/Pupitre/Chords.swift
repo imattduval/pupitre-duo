@@ -2,7 +2,7 @@ import Foundation
 
 enum Chords {
     private static let chord = /^\(?[A-G](?:#|b)?(?:maj|min|m|M|sus|dim|aug|add|no|omit|\+|-|°|ø|\d|\(|\)|,|#|b)*(?:\/[A-G](?:#|b)?)?\)?$/
-    private static let filler = /^(?:\||\|\||-|–|\/|%|[xX]\d{1,2}|\d{1,2}[xX]|\.+|:|\(|\))$/
+    private static let filler = /^(?:\||\|\||-|–|\/|%|\(?(?:[xX]\d{1,2}|\d{1,2}[xX])\)?|\(?N\.C\.?\)?|\.+|:|\(|\))$/
     private static let root = /(^\(?|\/)([A-G](?:#|b)?)/
     private static let sharps = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     private static let flats = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
@@ -92,8 +92,10 @@ enum Chords {
     }
 
     static func isChordLine(_ line: String) -> Bool {
-        let words = line.split(whereSeparator: \.isWhitespace).map(String.init)
+        var words = line.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !words.isEmpty else { return false }
+        // « Intro: Am G » ou « Refrain : C G » : l'étiquette devant la grille n'en fait pas des paroles.
+        if words[0].hasSuffix(":") { words.removeFirst() } else if words.count > 1, words[1] == ":" { words.removeFirst(2) }
         var found = 0
         for word in words {
             if word.wholeMatch(of: chord) != nil { found += 1 }

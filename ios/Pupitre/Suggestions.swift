@@ -32,7 +32,9 @@ enum SuggestionEngine {
                 if points > best { best = points; reason = label }
             }
             // Ce qu'on a vraiment joué ensuite passe avant toute ressemblance : 20 points dépassent le total des autres motifs.
-            if let times = playedAfter[candidate.url], times > 0 { add("Souvent joué après", 20 * times) }
+            // Une seule fois peut être un hasard (Suivant pour choisir, toucher par erreur) : petit bonus, sans motif affiché.
+            let times = playedAfter[candidate.url] ?? 0
+            if times >= 2 { add("Souvent joué après", 20 * times) } else if times == 1 { score += 2 }
             if !artist.isEmpty, key(candidate.artist) == artist { add("Même artiste", 4) }
             if let mine = current.mood, let theirs = candidate.mood {
                 let shared = Set(mine.tags).intersection(theirs.tags).count

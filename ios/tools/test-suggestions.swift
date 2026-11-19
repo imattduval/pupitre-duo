@@ -19,6 +19,12 @@ func song(_ url: String, artist: String = "", language: String? = nil, decade: I
         precondition(result == [Suggestion(url: "habit", reason: "Souvent joué après"),
                                 Suggestion(url: "twin", reason: "Même artiste")], "\(result)")
 
+        // Un seul enchaînement peut être un hasard : petit bonus, jamais « Souvent joué après », et rien sans autre motif.
+        result = SuggestionEngine.suggestions(for: current, among: [song("peer", decade: 1960), song("once", decade: 1960), song("alone")],
+                                              playedAfter: ["once": 1, "alone": 1])
+        precondition(result == [Suggestion(url: "once", reason: "Même époque"),
+                                Suggestion(url: "peer", reason: "Même époque")], "\(result)")
+
         // Le morceau en cours n'est jamais proposé, même joué après lui-même.
         result = SuggestionEngine.suggestions(for: current, among: [current, twin], playedAfter: ["a": 5])
         precondition(!result.contains { $0.url == "a" }, "\(result)")

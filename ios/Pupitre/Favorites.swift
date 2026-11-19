@@ -21,7 +21,7 @@ import Observation
         }
     }
 
-    func contains(_ url: String) -> Bool { urls.contains(url) }
+    func contains(_ url: String) -> Bool { urls.contains(where: Self.same(url)) }
 
     func toggle(_ url: String) {
         if contains(url) {
@@ -34,8 +34,14 @@ import Observation
 
     func remove(_ url: String) {
         guard contains(url) else { return }
-        urls.removeAll { $0 == url }
+        urls.removeAll(where: Self.same(url))
         save()
+    }
+
+    /// Le même morceau peut avoir deux formes de lien : comme library.song(matching:) et playlist(in:), on compare aussi le numéro UG.
+    private static func same(_ url: String) -> (String) -> Bool {
+        let id = Song(url: url, title: "", artist: "").tabID
+        return { $0 == url || (id != nil && Song(url: $0, title: "", artist: "").tabID == id) }
     }
 
     /// Triée de A à Z comme les autres listes ; un favori retiré de la bibliothèque n'y apparaît plus.

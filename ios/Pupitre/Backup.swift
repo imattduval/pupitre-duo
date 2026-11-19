@@ -15,6 +15,8 @@ final class Backup {
     private static let bookmarkKey = "sauvegarde.dossier"
     /// Faux tant qu'une sauvegarde déjà présente dans le dossier n'a été ni restaurée ni remplacée à la main.
     private static let autoKey = "sauvegarde.auto"
+    /// Date du fichier juste après notre dernière écriture ou restauration : l'automatique n'écrase qu'un fichier resté tel quel.
+    private static let dateKey = "sauvegarde.date"
     private static let defaultsKeys = ["playlists.favorites", "playlist.ouverte"]
 
     private struct Archive: Codable {
@@ -112,6 +114,7 @@ final class Backup {
             }
             lastSave = archive.date
             lastError = nil
+            noteFileDate()
             setAuto(true)
         } catch {
             if (error as? CocoaError)?.code == .fileWriteFileExists {
@@ -125,10 +128,26 @@ final class Backup {
 
     func saveIfConfigured() {
         guard folder != nil, UserDefaults.standard.bool(forKey: Self.autoKey) else { return }
+        do {
+            let date = try withFolder { try fileDate(in: $0) }
+            // Changé depuis notre dernière écriture (autre appareil, téléphone restauré, Drive en retard) : on ne l'écrase pas.
+            guard date == UserDefaults.standard.object(forKey: Self.dateKey) as? Date else {
+                setAuto(false)
+                lastSave = date
+                lastError = "La sauvegarde du dossier a changé ailleurs : restaurez-la ou remplacez-la."
+                return
+            }
+        } catch let error as CocoaError where [.fileReadNoSuchFile, .fileNoSuchFile].contains(error.code) {
+            // Fichier supprimé du dossier : rien à écraser.
+        } catch {
+            lastError = "Sauvegarde impossible : \(Self.message(for: error))"
+            return
+        }
         saveNow()
     }
 
     func restore() throws -> Int {
+        var wrote = false
         do {
             let data = try withFolder { folder in
                 try coordinatedRead(folder.appending(path: Self.fileName)) { try Data(contentsOf: $0) }
@@ -138,6 +157,8 @@ final class Backup {
             guard let archive = try? decoder.decode(Archive.self, from: data) else { throw Failure.unreadable }
             guard archive.version <= 1 else { throw Failure.newerVersion }
             let files = archive.files.filter { Self.isSafeName($0.key) }
+            // Une sauvegarde sans fichier viderait tout le téléphone, maintenant que l'absent est effacé.
+            guard !files.isEmpty else { throw Failure.unreadable }
             // Tout vérifier avant d'écrire : un fichier abîmé ferait repartir un store à vide.
             for text in files.values {
                 guard (try? JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed)) != nil else {
@@ -146,15 +167,28 @@ final class Backup {
             }
             for (name, text) in files {
                 try Data(text.utf8).write(to: documents.appending(path: name), options: .atomic)
+                wrote = true
             }
-            for (key, value) in archive.defaults where Self.defaultsKeys.contains(key) {
-                UserDefaults.standard.set(value, forKey: key)
+            // Tout est remplacé : un fichier ou un réglage absent de la sauvegarde n'existait pas encore, il part aussi.
+            for url in try FileManager.default.contentsOfDirectory(at: documents, includingPropertiesForKeys: nil)
+            where url.pathExtension == "json" && files[url.lastPathComponent] == nil {
+                try FileManager.default.removeItem(at: url)
+            }
+            for key in Self.defaultsKeys {
+                if let value = archive.defaults[key] {
+                    UserDefaults.standard.set(value, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
             }
             lastSave = archive.date
             lastError = nil
+            noteFileDate()
             setAuto(true)
             return files.count
         } catch {
+            // Restauration à moitié écrite : ce mélange ne part pas dans le dossier, la sauvegarde y reste à restaurer.
+            if wrote { setAuto(false) }
             lastError = "Restauration impossible : \(Self.message(for: error))"
             throw error
         }
@@ -183,6 +217,11 @@ final class Backup {
     private func setAuto(_ on: Bool) {
         awaitsChoice = !on
         UserDefaults.standard.set(on, forKey: Self.autoKey)
+    }
+
+    /// Sans date relue, rien n'est retenu : l'automatique s'arrêtera plutôt que d'écraser à l'aveugle.
+    private func noteFileDate() {
+        UserDefaults.standard.set(try? withFolder { try fileDate(in: $0) }, forKey: Self.dateKey)
     }
 
     private func remember(_ url: URL) throws {
