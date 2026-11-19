@@ -11,6 +11,8 @@ struct Song: Codable, Identifiable, Equatable {
     var text: String?
     var transpose = 0
     var speed: Double = 30
+    /// Vitesse en paroles seules, retenue à part ; nil tant qu'elle n'a pas été réglée.
+    var lyricsSpeed: Double?
     var scale: Double = 1.4
 
     var id: String { url }
@@ -33,6 +35,8 @@ struct Playlist: Decodable, Identifiable, Hashable {
     let ids: [Int]
     /// L'historique garde l'ordre des écoutes ; toutes les autres listes sont triées de A à Z.
     var isHistory = false
+    /// Liste montrée dans l'ordre de ses ids (historique, plus joués, concert), pas de A à Z.
+    var keepsOrder = false
 
     var id: String { name }
 
@@ -57,9 +61,15 @@ private struct Account: Decodable {
 final class Library {
     private(set) var songs: [Song] = []
     private(set) var playlists: [Playlist] = []
-    /// Dernière ouverture de chaque morceau, par lien. Fichier à part : le lecteur réenregistre
-    /// sa copie du morceau et effacerait une date rangée dans le morceau lui-même.
+    /// Dernière ouverture et nombre d'ouvertures de chaque morceau, par lien. Fichier à part : le lecteur
+    /// réenregistre sa copie du morceau et effacerait ce qui serait rangé dans le morceau lui-même.
     private(set) var playedAt: [String: Date] = [:]
+    private(set) var playCounts: [String: Int] = [:]
+
+    private struct HistoryFile: Codable {
+        var playedAt: [String: Date]
+        var counts: [String: Int]
+    }
     private let file: URL
     private let historyFile: URL
 
@@ -67,9 +77,15 @@ final class Library {
         let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         file = folder.appending(path: "bibliotheque.json")
         historyFile = folder.appending(path: "historique.json")
-        if let data = try? Data(contentsOf: historyFile),
-           let saved = try? JSONDecoder().decode([String: Date].self, from: data) {
-            playedAt = saved
+        if let data = try? Data(contentsOf: historyFile) {
+            if let saved = try? JSONDecoder().decode(HistoryFile.self, from: data) {
+                playedAt = saved.playedAt
+                playCounts = saved.counts
+            } else if let old = try? JSONDecoder().decode([String: Date].self, from: data) {
+                // Première version : seulement les dates. Chaque morceau daté compte pour une écoute.
+                playedAt = old
+                playCounts = old.mapValues { _ in 1 }
+            }
         }
         if let data = try? Data(contentsOf: file),
            let saved = try? JSONDecoder().decode([Song].self, from: data) {
@@ -117,7 +133,8 @@ final class Library {
     /// Listes calculées une fois à chaque changement de la bibliothèque, pas à chaque affichage.
     private(set) var decadePlaylists: [Playlist] = []
     private(set) var languagePlaylists: [Playlist] = []
-    private(set) var history = Playlist(name: Library.historyName, ids: [], isHistory: true)
+    private(set) var history = Playlist(name: Library.historyName, ids: [], isHistory: true, keepsOrder: true)
+    private(set) var mostPlayed = Playlist(name: Library.mostPlayedName, ids: [], keepsOrder: true)
     @ObservationIgnored private var byID: [Int: Song] = [:]
     @ObservationIgnored private var scopes: [String: [Song]] = [:]
 
@@ -135,6 +152,7 @@ final class Library {
         decadePlaylists = makeDecadePlaylists()
         languagePlaylists = makeLanguagePlaylists()
         history = makeHistory()
+        mostPlayed = makeMostPlayed()
     }
 
     /// Listes créées automatiquement. Vides tant que le classement n'est pas livré avec l'app.
@@ -183,6 +201,7 @@ final class Library {
     private(set) var alphabetical: [Song] = []
 
     static let historyName = "Historique"
+    static let mostPlayedName = "Les plus joués"
 
     /// Tous les morceaux déjà ouverts, du plus récent au plus ancien. Ceux ouverts avant que l'app
     /// note les dates (paroles déjà chargées, sans date) suivent, de A à Z.
@@ -194,13 +213,28 @@ final class Library {
         let undated = alphabetical
             .filter { $0.isReady && playedAt[$0.url] == nil }
             .compactMap(\.tabID)
-        return Playlist(name: Self.historyName, ids: dated + undated, isHistory: true)
+        return Playlist(name: Self.historyName, ids: dated + undated, isHistory: true, keepsOrder: true)
+    }
+
+    /// Les morceaux comptés depuis que l'app note les écoutes, du plus joué au moins joué ;
+    /// à égalité, le plus récent d'abord.
+    private func makeMostPlayed() -> Playlist {
+        let ids = songs
+            .compactMap { song -> (id: Int, count: Int, date: Date)? in
+                guard let id = song.tabID, let count = playCounts[song.url], count > 0 else { return nil }
+                return (id, count, playedAt[song.url] ?? .distantPast)
+            }
+            .sorted { ($0.count, $0.date) > ($1.count, $1.date) }
+            .map(\.id)
+        return Playlist(name: Self.mostPlayedName, ids: ids, keepsOrder: true)
     }
 
     func markPlayed(_ song: Song) {
         playedAt[song.url] = .now
+        playCounts[song.url, default: 0] += 1
         history = makeHistory()
-        if let data = try? JSONEncoder().encode(playedAt) {
+        mostPlayed = makeMostPlayed()
+        if let data = try? JSONEncoder().encode(HistoryFile(playedAt: playedAt, counts: playCounts)) {
             try? data.write(to: historyFile, options: .atomic)
         }
     }
@@ -208,7 +242,7 @@ final class Library {
     func songs(in playlist: Playlist?) -> [Song] {
         guard let playlist else { return alphabetical }
         // L'historique suit l'ordre de la liste reçue : le lecteur garde celle de son ouverture.
-        if playlist.isHistory { return playlist.ids.compactMap { byID[$0] } }
+        if playlist.keepsOrder { return playlist.ids.compactMap { byID[$0] } }
         if let cached = scopes[playlist.name] { return cached }
         let ids = Set(playlist.ids)
         let result = alphabetical.filter { $0.tabID.map(ids.contains) ?? false }
@@ -263,6 +297,7 @@ final class Library {
     func remove(_ song: Song) {
         songs.removeAll { $0.url == song.url }
         playedAt[song.url] = nil
+        playCounts[song.url] = nil
         save()
     }
 
