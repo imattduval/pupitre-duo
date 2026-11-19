@@ -69,7 +69,11 @@ final class Library {
     private struct HistoryFile: Codable {
         var playedAt: [String: Date]
         var counts: [String: Int]
+        /// Les morceaux ouverts avant les dates, figés au premier lancement : un morceau chargé ensuite
+        /// sans être joué (hors ligne, ou quitté avant 10 secondes) n'entre pas dans l'historique.
+        var legacy: [String]?
     }
+    private var legacy: Set<String> = []
     private let file: URL
     private let historyFile: URL
 
@@ -77,10 +81,12 @@ final class Library {
         let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         file = folder.appending(path: "bibliotheque.json")
         historyFile = folder.appending(path: "historique.json")
+        var savedLegacy: [String]?
         if let data = try? Data(contentsOf: historyFile) {
             if let saved = try? JSONDecoder().decode(HistoryFile.self, from: data) {
                 playedAt = saved.playedAt
                 playCounts = saved.counts
+                savedLegacy = saved.legacy
             } else if let old = try? JSONDecoder().decode([String: Date].self, from: data) {
                 // Première version : seulement les dates. Chaque morceau daté compte pour une écoute.
                 playedAt = old
@@ -90,6 +96,12 @@ final class Library {
         if let data = try? Data(contentsOf: file),
            let saved = try? JSONDecoder().decode([Song].self, from: data) {
             songs = saved
+        }
+        if let savedLegacy {
+            legacy = Set(savedLegacy)
+        } else {
+            legacy = Set(songs.filter { $0.isReady && playedAt[$0.url] == nil }.map(\.url))
+            saveHistory()
         }
         // Une seule fois : l'ancienne taille par défaut (100 %) passe à 140 %.
         if !UserDefaults.standard.bool(forKey: "taille.140") {
@@ -136,7 +148,7 @@ final class Library {
     private(set) var history = Playlist(name: Library.historyName, ids: [], isHistory: true, keepsOrder: true)
     private(set) var mostPlayed = Playlist(name: Library.mostPlayedName, ids: [], keepsOrder: true)
     @ObservationIgnored private var byID: [Int: Song] = [:]
-    @ObservationIgnored private var scopes: [String: [Song]] = [:]
+    @ObservationIgnored private var scopes: [Playlist: [Song]] = [:]
 
     private func refresh() {
         alphabetical = songs
@@ -211,7 +223,7 @@ final class Library {
             .sorted { $0.1 > $1.1 }
             .map(\.0)
         let undated = alphabetical
-            .filter { $0.isReady && playedAt[$0.url] == nil }
+            .filter { $0.isReady && playedAt[$0.url] == nil && legacy.contains($0.url) }
             .compactMap(\.tabID)
         return Playlist(name: Self.historyName, ids: dated + undated, isHistory: true, keepsOrder: true)
     }
@@ -234,7 +246,11 @@ final class Library {
         playCounts[song.url, default: 0] += 1
         history = makeHistory()
         mostPlayed = makeMostPlayed()
-        if let data = try? JSONEncoder().encode(HistoryFile(playedAt: playedAt, counts: playCounts)) {
+        saveHistory()
+    }
+
+    private func saveHistory() {
+        if let data = try? JSONEncoder().encode(HistoryFile(playedAt: playedAt, counts: playCounts, legacy: Array(legacy))) {
             try? data.write(to: historyFile, options: .atomic)
         }
     }
@@ -243,10 +259,11 @@ final class Library {
         guard let playlist else { return alphabetical }
         // L'historique suit l'ordre de la liste reçue : le lecteur garde celle de son ouverture.
         if playlist.keepsOrder { return playlist.ids.compactMap { byID[$0] } }
-        if let cached = scopes[playlist.name] { return cached }
+        // Clé = la liste entière : « À travailler » change d'ids sans que la bibliothèque change.
+        if let cached = scopes[playlist] { return cached }
         let ids = Set(playlist.ids)
         let result = alphabetical.filter { $0.tabID.map(ids.contains) ?? false }
-        scopes[playlist.name] = result
+        scopes[playlist] = result
         return result
     }
 

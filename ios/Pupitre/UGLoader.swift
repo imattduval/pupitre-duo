@@ -41,24 +41,38 @@ final class UGLoader {
         return WKWebView(frame: CGRect(x: -3000, y: 0, width: 1500, height: 1000), configuration: configuration)
     }()
 
-    func search(_ query: String) async throws -> [SearchResult] {
+    @ObservationIgnored private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    /// Une seule page web : un chargement attend la fin du précédent, sinon il l'interromprait.
+    private func oneAtATime<T>(_ work: () async throws -> T) async throws -> T {
+        if isBusy { await withCheckedContinuation { waiting.append($0) } }
         isBusy = true
-        defer { isBusy = false }
+        // isBusy reste vrai pendant la passation : personne ne double la file.
+        defer { if waiting.isEmpty { isBusy = false } else { waiting.removeFirst().resume() } }
+        try Task.checkCancellation()
         attachIfNeeded()
-        try await openSearchOrigin()
-        var found = try await searchPages(query)
-        // UG exige tous les mots : « La foule sentimentale » trouve mieux sans son article.
-        let short = query.replacing(/^(?i)(la|le|les|l'|un|une|the)\s*/, with: "")
-        if found.count < 5, short != query, !short.isEmpty {
-            let more = try await searchPages(short)
-            found += more.filter { item in !found.contains { $0.url == item.url } }
+        return try await work()
+    }
+
+    func search(_ query: String) async throws -> [SearchResult] {
+        try await oneAtATime {
+            try await openSearchOrigin()
+            var found = try await searchPages(query)
+            // UG exige tous les mots : « La foule sentimentale » trouve mieux sans son article.
+            let short = query.replacing(/^(?i)(la|le|les|l'|un|une|the)\s*/, with: "")
+            if found.count < 5, short != query, !short.isEmpty {
+                let more = try await searchPages(short)
+                found += more.filter { item in !found.contains { $0.url == item.url } }
+            }
+            return found
         }
-        return found
     }
 
     private func searchPages(_ query: String) async throws -> [SearchResult] {
         var found: [SearchResult] = []
         for page in 1...2 {
+            // Une recherche dépassée par la frappe libère vite la page pour la suivante.
+            try Task.checkCancellation()
             let answer = try await webView.callAsyncJavaScript(Self.searchScript,
                                                                arguments: ["q": query, "page": page],
                                                                contentWorld: .page) as? String
@@ -90,14 +104,11 @@ final class UGLoader {
 
     func song(at url: String) async throws -> LoadedSong {
         guard let address = URL(string: url) else { throw LoadError.failed }
-        let json = try await run(url: address, script: Self.songScript)
+        let json = try await oneAtATime { try await run(url: address, script: Self.songScript) }
         return try JSONDecoder().decode(LoadedSong.self, from: Data(json.utf8))
     }
 
     private func run(url: URL, script: String) async throws -> String {
-        isBusy = true
-        defer { isBusy = false }
-        attachIfNeeded()
         webView.load(URLRequest(url: url))
         try await Task.sleep(for: .seconds(1))
         var previous: String?

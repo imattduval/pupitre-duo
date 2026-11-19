@@ -3,12 +3,18 @@ import SwiftUI
 @main
 struct PupitreApp: App {
     @State private var library = Library()
+    @State private var workList = WorkList()
+    @State private var concerts = Concerts()
+    @State private var offline = OfflineLoader()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             LibraryView()
                 .environment(library)
+                .environment(workList)
+                .environment(concerts)
+                .environment(offline)
                 .preferredColorScheme(.dark)
                 .tint(Palette.chord)
                 // Au piano, l'écran ne doit jamais s'éteindre tant que l'app est ouverte.

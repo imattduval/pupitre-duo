@@ -10,10 +10,13 @@ struct PlayerView: View {
     @Environment(Library.self) private var library
     @Environment(\.dismiss) private var dismiss
     @State var song: Song
-    let playlist: Playlist?
+    /// Figée à l'ouverture : « Les plus joués » et « À travailler » changent pendant qu'on joue.
+    @State var playlist: Playlist?
     var resume = false
     let onSearch: (Song) -> Void
     @Environment(UGLoader.self) private var loader
+    @Environment(WorkList.self) private var workList
+    @State private var tappedChord: TappedChord?
     @State private var isLoading = false
     @State private var message: String?
     @State private var isPlaying = false
@@ -45,13 +48,17 @@ struct PlayerView: View {
                     header(topInset: insets.top, isClosed: isClosed, trailing: insets.trailing)
                     Divider().padding(.trailing, isClosedPortrait ? insets.trailing : 0)
                 }
-                SheetView(song: song, lyricsOnly: lyricsOnly, isPlaying: $isPlaying,
+                SheetView(song: song, lyricsOnly: lyricsOnly, speed: shownSpeed, isPlaying: $isPlaying,
                           startOffset: resume ? SheetView.lastOffset : nil,
                           topInset: 0,
                           sideInset: isClosed && isWide ? 8 : 16,
                           onScale: { value in change { $0.scale = value } },
                           onBack: { dismiss() },
-                          onTap: textTapped)
+                          onTap: textTapped,
+                          onChord: { chord in
+                              // En plein défilement, toucher le texte garde son rôle : pause ou rappel des commandes.
+                              if isPlaying || controlsHidden { textTapped() } else { tappedChord = TappedChord(name: chord) }
+                          })
                     .id(song.url)
                     .overlay {
                         if isLoading {
@@ -103,6 +110,10 @@ struct PlayerView: View {
             .ignoresSafeArea(edges: isWide ? [.top, .bottom, .leading, .trailing] : isClosedPortrait ? [.top, .bottom, .trailing] : [.top, .bottom])
         }
         .background(Palette.background)
+        .sheet(item: $tappedChord) { chord in
+            PianoChordView(chord: chord.name)
+                .presentationDetents([.medium, .large])
+        }
         // Écran fermé en vertical : l'heure et le réseau laissent la place au morceau. Ouvert, on les garde.
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width && $0.size.width < 560 } action: { hidesStatusBar = $0 }
         .statusBarHidden(hidesStatusBar)
@@ -142,6 +153,7 @@ struct PlayerView: View {
                 Text(song.artist).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
+            workButton(side: false)
             if !isClosed {
                 iconButton("backward.end.fill", label: "Morceau précédent") { go(-1) }
                 iconButton("forward.end.fill", label: "Morceau suivant") { go(1) }
@@ -199,6 +211,8 @@ struct PlayerView: View {
             compactSpeed
             compactKey
             compactLyrics
+            // Rangée à part : trois boutons sur la première passeraient sous 44 points de large.
+            workButton(side: true)
             Spacer(minLength: 0)
         }
     }
@@ -230,9 +244,8 @@ struct PlayerView: View {
     }
 
     private var compactSpeed: some View {
-        sideStepper(icon: "speedometer", label: "Vitesse", value: "\(Int(song.speed))",
-                    minus: { change { $0.speed = max(5, $0.speed - 5) } },
-                    plus: { change { $0.speed = min(150, $0.speed + 5) } })
+        sideStepper(icon: "speedometer", label: "Vitesse", value: "\(Int(shownSpeed))",
+                    minus: { changeSpeed(by: -5) }, plus: { changeSpeed(by: 5) })
     }
 
     private var compactKey: some View {
@@ -251,7 +264,10 @@ struct PlayerView: View {
         VStack(spacing: 6) {
             // Calé en bas : le vide reste sous l'heure, où iOS peut afficher ses propres éléments.
             Spacer(minLength: 0)
-            sideButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
+            HStack(spacing: 4) {
+                sideButton("chevron.left", label: "Retour à la liste", height: 46) { dismiss() }
+                workButton(side: true)
+            }
             HStack(spacing: 4) {
                 sideButton("backward.end.fill", label: "Morceau précédent", height: 46) { go(-1) }
                 sideButton("forward.end.fill", label: "Morceau suivant", height: 46) { go(1) }
@@ -306,7 +322,7 @@ struct PlayerView: View {
     }
 
     /// Bouton entouré de la barre de paysage : on voit où toucher sans regarder longtemps.
-    private func sideButton(_ icon: String, label: String, height: CGFloat, action: @escaping () -> Void) -> some View {
+    private func sideButton(_ icon: String, label: String, height: CGFloat, tint: Color = .primary, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.title3.bold())
@@ -316,7 +332,21 @@ struct PlayerView: View {
                 .contentShape(.rect)
         }
         .accessibilityLabel(label)
-        .foregroundStyle(.primary)
+        .foregroundStyle(tint)
+    }
+
+    /// Drapeau « À travailler » : rempli et jaune quand le morceau y est. Les étoiles restent aux favoris.
+    @ViewBuilder
+    private func workButton(side: Bool) -> some View {
+        let isIn = workList.contains(song.url)
+        let icon = isIn ? "flag.fill" : WorkList.icon
+        let label = isIn ? "Retirer de À travailler" : "Ajouter à À travailler"
+        let tint = isIn ? Palette.chord : Color.primary
+        if side {
+            sideButton(icon, label: label, height: 46, tint: tint, action: toggleWork)
+        } else {
+            iconButton(icon, label: label, tint: tint, action: toggleWork)
+        }
     }
 
     private var playButton: some View {
@@ -344,9 +374,19 @@ struct PlayerView: View {
     }
 
     private var speed: some View {
-        stepper(icon: "speedometer", label: "Vitesse", value: "\(Int(song.speed))",
-                minus: { change { $0.speed = max(5, $0.speed - 5) } },
-                plus: { change { $0.speed = min(150, $0.speed + 5) } })
+        stepper(icon: "speedometer", label: "Vitesse", value: "\(Int(shownSpeed))",
+                minus: { changeSpeed(by: -5) }, plus: { changeSpeed(by: 5) })
+    }
+
+    /// Les paroles seules ont leur propre vitesse ; tant qu'elle n'est pas réglée, 70 % de celle des accords.
+    private var shownSpeed: Double {
+        guard lyricsOnly else { return song.speed }
+        return song.lyricsSpeed ?? max(5, (song.speed * 0.7 / 5).rounded() * 5)
+    }
+
+    private func changeSpeed(by step: Double) {
+        let value = min(150, max(5, shownSpeed + step))
+        change { if lyricsOnly { $0.lyricsSpeed = value } else { $0.speed = value } }
     }
 
     private var key: some View {
@@ -400,12 +440,23 @@ struct PlayerView: View {
         .foregroundStyle(.primary)
     }
 
-    private func iconButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ icon: String, label: String, tint: Color = .primary, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).frame(width: 44, height: 44).contentShape(.rect)
         }
         .accessibilityLabel(label)
-        .foregroundStyle(.primary)
+        .foregroundStyle(tint)
+    }
+
+    private func toggleWork() {
+        workList.toggle(song.url)
+        controlsActivity += 1
+        let text = workList.contains(song.url) ? "Ajouté à À travailler" : "Retiré"
+        message = text
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            if message == text { message = nil }
+        }
     }
 
     private func showControls() {
@@ -454,6 +505,11 @@ struct PlayerView: View {
     }
 }
 
+private struct TappedChord: Identifiable {
+    let name: String
+    var id: String { name }
+}
+
 /// Texte à chasse fixe qui ne revient jamais à la ligne, pour garder les accords alignés.
 struct SheetView: UIViewRepresentable {
     /// Où en était le dernier morceau refermé, pour y revenir après un clic par erreur.
@@ -461,6 +517,7 @@ struct SheetView: UIViewRepresentable {
 
     let song: Song
     let lyricsOnly: Bool
+    let speed: Double
     @Binding var isPlaying: Bool
     let startOffset: CGFloat?
     let topInset: CGFloat
@@ -468,6 +525,7 @@ struct SheetView: UIViewRepresentable {
     let onScale: (Double) -> Void
     let onBack: () -> Void
     let onTap: () -> Void
+    let onChord: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(isPlaying: $isPlaying) }
 
@@ -482,7 +540,7 @@ struct SheetView: UIViewRepresentable {
         label.numberOfLines = 0
         label.accessibilityIdentifier = "sheet.text"
         scroll.addSubview(label)
-        scroll.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped)))
+        scroll.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:))))
         scroll.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinched)))
         let back = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.swipedRight))
         back.delegate = context.coordinator
@@ -496,7 +554,7 @@ struct SheetView: UIViewRepresentable {
     func updateUIView(_ scroll: UIScrollView, context: Context) {
         let coordinator = context.coordinator
         coordinator.isPlayingBinding = $isPlaying
-        coordinator.speed = song.speed
+        coordinator.speed = speed
         if coordinator.topInset != topInset || coordinator.sideInset != sideInset {
             coordinator.topInset = topInset
             coordinator.sideInset = sideInset
@@ -505,6 +563,7 @@ struct SheetView: UIViewRepresentable {
         coordinator.onScale = onScale
         coordinator.onBack = onBack
         coordinator.onTap = onTap
+        coordinator.onChord = onChord
         coordinator.render(song: song, lyricsOnly: lyricsOnly)
         coordinator.setPlaying(isPlaying)
     }
@@ -523,6 +582,9 @@ struct SheetView: UIViewRepresentable {
         private var accumulated: CGFloat = 0
         private var signature = ""
         private var lines: [Chords.Line] = []
+        /// Les lignes telles qu'affichées (après passage à la ligne), pour retrouver l'accord touché.
+        private var visible: [Chords.Line] = []
+        private var columnWidth: CGFloat = 10
         private var scale: Double = 1
 
         init(isPlaying: Binding<Bool>) { isPlayingBinding = isPlaying }
@@ -530,13 +592,55 @@ struct SheetView: UIViewRepresentable {
         var onScale: (Double) -> Void = { _ in }
         var onBack: () -> Void = {}
         var onTap: () -> Void = {}
+        var onChord: (String) -> Void = { _ in }
         private var pinchStart: Double = 1
         private var pointsPerSecond: Double = 20
         var pendingOffset: CGFloat?
         var topInset: CGFloat = 0
         var sideInset: CGFloat = 16
 
-        @objc func tapped() { onTap() }
+        @objc func tapped(_ gesture: UITapGestureRecognizer) {
+            if let chord = chord(at: gesture.location(in: label)) { onChord(chord) } else { onTap() }
+        }
+
+        /// La ligne vient de TextKit, avec le texte et la largeur du label ; la colonne, de la chasse fixe.
+        private func chord(at point: CGPoint) -> String? {
+            guard let text = label.attributedText, text.length > 0,
+                  point.y >= 0, point.y < label.bounds.height else { return nil }
+            let storage = NSTextStorage(attributedString: text)
+            let manager = NSLayoutManager()
+            let container = NSTextContainer(size: CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude))
+            container.lineFragmentPadding = 0
+            manager.addTextContainer(container)
+            storage.addLayoutManager(manager)
+            // usedRect ne calcule pas la mise en page lui-même : sans ça il vaut 0.
+            manager.ensureLayout(for: container)
+            // Si UILabel et TextKit diffèrent d'un rien par ligne, l'écart s'accumulerait en bas des longs morceaux.
+            let used = manager.usedRect(for: container).height
+            let y = point.y * used / label.bounds.height
+            let index = manager.characterIndex(for: CGPoint(x: point.x, y: y), in: container,
+                                               fractionOfDistanceBetweenInsertionPoints: nil)
+            let row = (text.string as NSString).substring(to: min(index, text.length)).reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+            guard row < visible.count, visible[row].kind == .chord else { return nil }
+            return Self.chord(in: visible[row].text, at: Int((point.x / columnWidth).rounded(.down)))
+        }
+
+        /// L'accord le plus proche de la colonne, à un caractère près de chaque côté ; jamais un « | » ou un « x2 ».
+        static func chord(in line: String, at column: Int) -> String? {
+            let characters = Array(line)
+            var best: (distance: Int, chord: String)?
+            var start = 0
+            while start < characters.count {
+                guard !characters[start].isWhitespace else { start += 1; continue }
+                var end = start
+                while end < characters.count, !characters[end].isWhitespace { end += 1 }
+                let word = String(characters[start..<end])
+                let distance = column < start ? start - column : column >= end ? column - end + 1 : 0
+                if distance <= 1, distance < (best?.distance ?? 2), Chords.isChordLine(word) { best = (distance, word) }
+                start = end
+            }
+            return best?.chord
+        }
 
         @objc func pinched(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
@@ -594,7 +698,8 @@ struct SheetView: UIViewRepresentable {
             // Taille liée à la largeur de l'écran, pas à la ligne la plus longue : une longue ligne
             // passe à la ligne au lieu de rapetisser tout le morceau.
             let size = max(14, available / 35) * scale
-            let visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
+            visible = Chords.wrap(lines, width: max(10, Int(available / (size * unit))))
+            columnWidth = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: size, weight: .bold)]).width
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = size * 0.18
             paragraph.lineBreakMode = .byClipping
