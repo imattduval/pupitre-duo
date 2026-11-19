@@ -13,6 +13,8 @@ struct Song: Codable, Identifiable, Equatable {
     var speed: Double = 30
     /// Vitesse en paroles seules, retenue à part ; nil tant qu'elle n'a pas été réglée.
     var lyricsSpeed: Double?
+    /// Vitesse en accords seuls, retenue à part ; nil tant qu'elle n'a pas été réglée.
+    var chordsSpeed: Double?
     var scale: Double = 1.4
 
     var id: String { url }
@@ -141,6 +143,15 @@ final class Library {
               let entries = try? JSONDecoder().decode([String: Entry].self, from: data) else { return [:] }
         return Dictionary(uniqueKeysWithValues: entries.compactMap { key, value in Int(key).map { ($0, value) } })
     }()
+
+    /// Pour les suggestions : décennie connue (0 veut dire inconnue dans le classement) et langue.
+    func decade(of song: Song) -> Int? {
+        song.tabID.flatMap { classement[$0]?.decade }.flatMap { $0 == 0 ? nil : $0 }
+    }
+
+    func language(of song: Song) -> String? {
+        song.language ?? song.tabID.flatMap { classement[$0]?.language }
+    }
 
     /// Listes calculées une fois à chaque changement de la bibliothèque, pas à chaque affichage.
     private(set) var decadePlaylists: [Playlist] = []
